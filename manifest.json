@@ -1,17 +1,16 @@
 {
-  "name": "Alph Glass - تاجر",
-  "short_name": "Alph Glass",
-  "description": "تطبيق إدارة المخزون والمبيعات والفواتير",
-  "start_url": "./index.html",
+  "name": "Alpha Glass",
+  "short_name": "Alpha Glass",
+  "id": "./",
+  "start_url": "./",
   "scope": "./",
   "display": "standalone",
-  "orientation": "portrait",
-  "background_color": "#111111",
-  "theme_color": "#111111",
+  "background_color": "#0A0E17",
+  "theme_color": "#0A0E17",
   "lang": "ar",
   "dir": "rtl",
   "icons": [
-    {"src":"icon-192.svg","sizes":"192x192","type":"image/svg+xml","purpose":"any maskable"},
-    {"src":"icon-512.svg","sizes":"512x512","type":"image/svg+xml","purpose":"any maskable"}
+    {"src":"./icons/icon-192.png","sizes":"192x192","type":"image/png","purpose":"any maskable"},
+    {"src":"./icons/icon-512.png","sizes":"512x512","type":"image/png","purpose":"any maskable"}
   ]
 }
