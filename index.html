@@ -622,13 +622,9 @@
         <div class="l">إجمالي عدد القطع بالمخزون</div>
       </div>
     </div>
-    <div class="chip-row" id="invChips">
-      <button class="chip active" data-cat="all" onclick="setInvFilter('all')">الكل</button>
-      <button class="chip" data-cat="low" onclick="setInvFilter('low')">⚠ منخفض</button>
-      <button class="chip" data-cat="glass" onclick="setInvFilter('glass')">زجاج حماية</button>
-      <button class="chip" data-cat="acc" onclick="setInvFilter('acc')">إكسسوارات</button>
-      <button class="chip" data-cat="other" onclick="setInvFilter('other')">أخرى</button>
-    </div>
+    <div class="section-title"><span>تفصيل القطع حسب الفئة</span></div>
+    <div class="ledger" id="invPiecesBreakdown" style="margin-bottom:14px;"></div>
+    <div class="chip-row" id="invChips"></div>
     <div class="field" id="invBrandFilterWrap" style="margin-bottom:14px;display:none;">
       <label>تصفية حسب الشركة</label>
       <select id="invBrandFilter" onchange="renderInventory()">
@@ -748,12 +744,7 @@
     <div class="search-bar">
       <input type="text" id="posSearch" placeholder="ابحث عن صنف..." oninput="renderPos()">
     </div>
-    <div class="chip-row" id="posChips">
-      <button class="chip active" data-cat="all" onclick="setPosFilter('all')">الكل</button>
-      <button class="chip" data-cat="glass" onclick="setPosFilter('glass')">زجاج حماية</button>
-      <button class="chip" data-cat="acc" onclick="setPosFilter('acc')">إكسسوارات</button>
-      <button class="chip" data-cat="other" onclick="setPosFilter('other')">أخرى</button>
-    </div>
+    <div class="chip-row" id="posChips"></div>
     <div id="posList" style="padding-bottom:110px;"></div>
   </section>
 
@@ -908,6 +899,10 @@ let editingGroupId = null;
 let loginLog = [];
 
 const catLabel = { glass: 'زجاج حماية', acc: 'إكسسوارات', other: 'أخرى' };
+function categoryLabel(p){
+  const c = p.category || 'other';
+  return catLabel[c] || c;
+}
 const glassTypeLabel = { esd: 'ESD', uv: 'UV', bordure: 'بدون حواف', fume: 'مدخّن' };
 
 function setInvFilter(cat){
@@ -1242,6 +1237,46 @@ function renderInventory(){
   const invCostCard = document.getElementById('invCostCard');
   if(invCostCard) invCostCard.style.display = settings.hideProfit ? 'none' : '';
 
+  const categoryPieces = {};
+  products.forEach(p=>{
+    const label = categoryLabel(p);
+    categoryPieces[label] = (categoryPieces[label] || 0) + p.qty;
+  });
+  const glassProducts = products.filter(p=>categoryLabel(p)==='زجاج حماية');
+  const glassByType = {};
+  let glassNoType = 0;
+  glassProducts.forEach(p=>{
+    if(!p.glassType){ glassNoType += p.qty; return; }
+    const label = glassTypeLabel[p.glassType] || p.glassType;
+    glassByType[label] = (glassByType[label] || 0) + p.qty;
+  });
+  const glassTypeEntries = Object.entries(glassByType).sort((a,b)=> b[1]-a[1]);
+  const catIcon = { 'زجاج حماية':'🛡', 'إكسسوارات':'🎧', 'أخرى':'📦' };
+  const breakdownEl = document.getElementById('invPiecesBreakdown');
+  if(breakdownEl){
+    const catEntries = Object.entries(categoryPieces).sort((a,b)=> b[1]-a[1]);
+    breakdownEl.innerHTML = catEntries.map(([label, qty])=>{
+      const icon = catIcon[label] || '🏷';
+      const isGlass = label === 'زجاج حماية';
+      return `
+      <div class="row">
+        <div class="row-main"><div class="row-name">${icon} ${escapeHtml(label)}</div></div>
+        <div class="qty-pill">${qty} قطعة</div>
+      </div>
+      ${isGlass ? glassTypeEntries.map(([t, tq])=>`
+      <div class="row" style="padding-right:26px;">
+        <div class="row-main"><div class="row-sub">${escapeHtml(t)}</div></div>
+        <div class="mono" style="font-weight:700;">${tq}</div>
+      </div>`).join('') : ''}
+      ${isGlass && glassNoType > 0 ? `
+      <div class="row" style="padding-right:26px;">
+        <div class="row-main"><div class="row-sub">بدون نوع محدد</div></div>
+        <div class="mono" style="font-weight:700;">${glassNoType}</div>
+      </div>` : ''}
+      `;
+    }).join('');
+  }
+
   const brands = [...new Set(products.map(p=>p.brand).filter(b=>b))].sort();
   const brandWrap = document.getElementById('invBrandFilterWrap');
   const brandSelect = document.getElementById('invBrandFilter');
@@ -1255,13 +1290,23 @@ function renderInventory(){
     }
   }
 
+  const invChipsEl = document.getElementById('invChips');
+  if(invChipsEl){
+    const cats = [...new Set(products.map(p=>categoryLabel(p)))].sort();
+    invChipsEl.innerHTML = `
+      <button class="chip ${invFilter==='all'?'active':''}" onclick="setInvFilter('all')">الكل</button>
+      <button class="chip ${invFilter==='low'?'active':''}" onclick="setInvFilter('low')">⚠ منخفض</button>
+      ${cats.map(c=>`<button class="chip ${invFilter===c?'active':''}" onclick="setInvFilter('${escapeHtml(c)}')">${escapeHtml(c)}</button>`).join('')}
+    `;
+  }
+
   if(products.length === 0){
     list.innerHTML = `<div class="empty"><span class="big">📦</span>لا توجد أصناف بعد<div class="hint">اضغط + لإضافة أول صنف في مخزونك</div></div>`;
     return;
   }
   const q = (document.getElementById('invSearch')?.value || '').trim().toLowerCase();
   const brandFilter = document.getElementById('invBrandFilter')?.value || '';
-  let filtered = invFilter==='all' ? products : (invFilter==='low' ? products.filter(p=>p.qty<=LOW_STOCK_THRESHOLD) : products.filter(p=>(p.category||'other')===invFilter));
+  let filtered = invFilter==='all' ? products : (invFilter==='low' ? products.filter(p=>p.qty<=LOW_STOCK_THRESHOLD) : products.filter(p=>categoryLabel(p)===invFilter));
   if(brandFilter) filtered = filtered.filter(p=>p.brand===brandFilter);
 
   let compatMatchInfo = {};
@@ -1297,14 +1342,15 @@ function renderInventory(){
   }
   list.innerHTML = filtered.map(p=>{
     const low = p.qty <= LOW_STOCK_THRESHOLD;
-    const cat = p.category || 'other';
+    const catLbl = categoryLabel(p);
+    const catClass = catLbl === 'زجاج حماية' ? 'glass' : (catLbl === 'إكسسوارات' ? 'acc' : 'other');
     const grp = p.compatGroupId ? compatGroups.find(g=>g.id===p.compatGroupId) : null;
     return `
     <div class="row">
       <div class="row-main">
         <div class="row-name">${escapeHtml(p.name)}</div>
         ${settings.hideProfit ? '' : `<div class="row-sub">هامش الربح: ${plainNum(p.sellPrice - p.buyPrice)} ${settings.currency}</div>`}
-        <span class="cat-badge ${cat}">${catLabel[cat]}</span>
+        <span class="cat-badge ${catClass}">${escapeHtml(catLbl)}</span>
         ${p.brand ? `<span class="cat-badge other" style="margin-right:4px;">${escapeHtml(p.brand)}</span>` : ''}
         ${p.glassType ? `<span class="cat-badge glass" style="margin-right:4px;">${escapeHtml(glassTypeLabel[p.glassType] || p.glassType)}</span>` : ''}
         ${grp ? `<span class="cat-badge other" style="margin-right:4px;">🧩 ${escapeHtml(grp.name)}</span>` : ''}
@@ -1341,22 +1387,18 @@ function openProductSheet(id){
       <input type="text" id="f-name" value="${p ? escapeHtml(p.name) : ''}" placeholder="مثال: زجاج حماية آيفون 13">
     </div>
     <div class="field">
-      <label>الفئة</label>
-      <select id="f-cat" onchange="toggleGlassTypeField()">
-        <option value="glass" ${p && p.category==='glass' ? 'selected':''}>زجاج حماية</option>
-        <option value="acc" ${p && p.category==='acc' ? 'selected':''}>إكسسوارات</option>
-        <option value="other" ${!p || p.category==='other' ? 'selected':''}>أخرى</option>
-      </select>
+      <label>الفئة (اختر من القائمة أو اكتب فئة جديدة)</label>
+      <input type="text" id="f-cat" list="catSuggestions" value="${p ? escapeHtml(categoryLabel(p)) : 'زجاج حماية'}" placeholder="مثال: شواحن" oninput="toggleGlassTypeField()">
+      <datalist id="catSuggestions">
+        ${[...new Set(['زجاج حماية','إكسسوارات','أخرى', ...products.map(x=>categoryLabel(x))])].map(c=>`<option value="${escapeHtml(c)}">`).join('')}
+      </datalist>
     </div>
     <div class="field" id="f-glasstype-wrap" style="display:none;">
-      <label>نوع الزجاج</label>
-      <select id="f-glasstype">
-        <option value="">— بدون —</option>
-        <option value="esd" ${p && p.glassType==='esd' ? 'selected':''}>ESD (مضاد للكهرباء الساكنة)</option>
-        <option value="uv" ${p && p.glassType==='uv' ? 'selected':''}>UV (لاصق كامل بالأشعة فوق البنفسجية)</option>
-        <option value="bordure" ${p && p.glassType==='bordure' ? 'selected':''}>بدون حواف (حافة لحافة)</option>
-        <option value="fume" ${p && p.glassType==='fume' ? 'selected':''}>مدخّن (Fumé)</option>
-      </select>
+      <label>نوع الزجاج (اختر من القائمة أو اكتب نوع جديد)</label>
+      <input type="text" id="f-glasstype" list="glassTypeSuggestions" value="${p && p.glassType ? escapeHtml(glassTypeLabel[p.glassType] || p.glassType) : ''}" placeholder="مثال: ESD">
+      <datalist id="glassTypeSuggestions">
+        ${[...new Set([...Object.values(glassTypeLabel), ...products.map(x=>x.glassType).filter(t=>t).map(t=>glassTypeLabel[t]||t)])].map(t=>`<option value="${escapeHtml(t)}">`).join('')}
+      </datalist>
     </div>
     <div class="field">
       <label>الشركة المصنّعة (اختياري)</label>
@@ -1411,9 +1453,9 @@ function openProductSheet(id){
 }
 
 function toggleGlassTypeField(){
-  const cat = document.getElementById('f-cat')?.value;
+  const cat = (document.getElementById('f-cat')?.value || '').trim();
   const wrap = document.getElementById('f-glasstype-wrap');
-  if(wrap) wrap.style.display = (cat === 'glass') ? '' : 'none';
+  if(wrap) wrap.style.display = (cat === 'glass' || cat === 'زجاج حماية') ? '' : 'none';
 }
 
 function recalcProductSummary(){
@@ -1433,10 +1475,10 @@ async function saveProductForm(){
   const buy = parseFloat(document.getElementById('f-buy').value);
   const sell = parseFloat(document.getElementById('f-sell').value);
   const qty = parseInt(document.getElementById('f-qty').value);
-  const category = document.getElementById('f-cat').value;
+  const category = document.getElementById('f-cat').value.trim() || 'أخرى';
   const compatGroupId = document.getElementById('f-group').value || null;
   const brand = document.getElementById('f-brand').value.trim() || null;
-  const glassType = category === 'glass' ? (document.getElementById('f-glasstype').value || null) : null;
+  const glassType = (category === 'glass' || category === 'زجاج حماية') ? (document.getElementById('f-glasstype').value.trim() || null) : null;
 
   if(!name){ showToast('أدخل اسم الصنف'); return; }
   if(isNaN(buy) || isNaN(sell) || isNaN(qty) || buy<0 || sell<0 || qty<0){
@@ -1626,7 +1668,7 @@ function quickAddToCart(productId){
   if(!p || p.qty <= 0){ showToast('غير متوفر بالمخزون'); return; }
   const cur = cart[productId] || 0;
   if(cur >= p.qty){ showToast('الكمية غير متوفرة'); return; }
-  cart[productId] = cur + 1;
+  cart[productId] = Math.min(cur + CART_STEP, p.qty);
   renderPos();
 }
 
@@ -1636,7 +1678,17 @@ function renderPos(){
   renderPosQuickAdd();
   const q = (document.getElementById('posSearch')?.value || '').trim().toLowerCase();
   const list = document.getElementById('posList');
-  const filtered = products.filter(p => p.name.toLowerCase().includes(q) && (posFilter==='all' || (p.category||'other')===posFilter));
+  const filtered = products.filter(p => p.name.toLowerCase().includes(q) && (posFilter==='all' || categoryLabel(p)===posFilter));
+
+  const posChipsEl = document.getElementById('posChips');
+  if(posChipsEl){
+    const cats = [...new Set(products.map(p=>categoryLabel(p)))].sort();
+    posChipsEl.innerHTML = `
+      <button class="chip ${posFilter==='all'?'active':''}" onclick="setPosFilter('all')">الكل</button>
+      ${cats.map(c=>`<button class="chip ${posFilter===c?'active':''}" onclick="setPosFilter('${escapeHtml(c)}')">${escapeHtml(c)}</button>`).join('')}
+    `;
+  }
+
   if(products.length === 0){
     list.innerHTML = `<div class="empty"><span class="big">🧾</span>أضف أصنافاً في المخزون أولاً<div class="hint">من قائمة ⚙ اختر المخزون للبدء</div></div>`;
     updateCartBar();
@@ -3024,8 +3076,8 @@ function openMoreMenu(){
 /* ================= Shareable Product Catalog ================= */
 function openProductCatalog(){
   const sheet = document.getElementById('sheetContent');
-  const glassItems = products.filter(p=>(p.category||'other')==='glass' && p.qty > 0);
-  const otherItems = products.filter(p=>(p.category||'other')!=='glass' && p.qty > 0);
+  const glassItems = products.filter(p=>categoryLabel(p)==='زجاج حماية' && p.qty > 0);
+  const otherItems = products.filter(p=>categoryLabel(p)!=='زجاج حماية' && p.qty > 0);
   const allAvailable = products.filter(p=>p.qty > 0);
 
   sheet.innerHTML = `
@@ -3100,7 +3152,7 @@ function buildCatalogText(type){
     header = '📋 قائمة الأسعار:';
   }else{
     const isGlassType = type==='glass';
-    items = products.filter(p=>((p.category||'other')==='glass')===isGlassType && p.qty>0);
+    items = products.filter(p=>(categoryLabel(p)==='زجاج حماية')===isGlassType && p.qty>0);
     header = isGlassType ? '🛡 المتوفر حاليًا من زجاج الحماية:' : '🎧 المتوفر حاليًا من الإكسسوارات:';
   }
   if(items.length === 0) return null;
@@ -3202,6 +3254,81 @@ function printProductLabels(productId){
   const grid = document.getElementById('labelGridContent');
   grid.innerHTML = Array.from({length: qty}).map(()=>`<div class="label-box">${escapeHtml(p.name)}</div>`).join('');
   window.print();
+}
+
+/* ================= Reset Data ================= */
+function openResetData(){
+  const sheet = document.getElementById('sheetContent');
+  sheet.innerHTML = `
+    <div class="sheet-head">
+      <h3>البدء من جديد</h3>
+      <button class="icon-btn" onclick="closeOverlay()">✕</button>
+    </div>
+    <div class="row-sub" style="margin-bottom:16px;">استخدمها بعد ما تخلّص تجربة التطبيق، عشان تبدأ ببيانات حقيقية نظيفة.</div>
+
+    <div class="ledger" style="margin-bottom:14px;">
+      <div class="row" style="cursor:pointer;" onclick="confirmResetData('sales')">
+        <div class="row-main">
+          <div class="row-name">🗑 مسح بيانات التجربة فقط</div>
+          <div class="row-sub">الفواتير، العملاء، الموردين، الطلبيات، المصاريف، السجلات</div>
+          <div class="row-sub" style="color:var(--profit);">✔ يبقي المخزون والأصناف كما هي</div>
+        </div>
+      </div>
+    </div>
+    <div class="ledger">
+      <div class="row" style="cursor:pointer;" onclick="confirmResetData('all')">
+        <div class="row-main">
+          <div class="row-name">⚠️ مسح كل شيء نهائيًا</div>
+          <div class="row-sub">كل ما سبق + المخزون والأصناف بالكامل</div>
+          <div class="row-sub" style="color:var(--alert);">تبقى فقط إعدادات المتجر ومجموعات التوافق</div>
+        </div>
+      </div>
+    </div>
+  `;
+  openOverlay();
+}
+
+function confirmResetData(level){
+  const sheet = document.getElementById('sheetContent');
+  const msg = level === 'all'
+    ? 'بيمسح كل البيانات فعليًا — المخزون، الفواتير، العملاء، كل شيء. ما فيه رجعة بعدها.'
+    : 'بيمسح الفواتير والعملاء والموردين والطلبيات والمصاريف والسجلات. المخزون بيبقى موجود.';
+  sheet.innerHTML = `
+    <div class="sheet-head">
+      <h3>تأكيد المسح</h3>
+      <button class="icon-btn" onclick="openResetData()">✕</button>
+    </div>
+    <div class="row-sub" style="margin-bottom:8px;color:var(--alert);font-weight:700;">${msg}</div>
+    <div class="row-sub" style="margin-bottom:16px;">اضغط "نسخة احتياطية أولاً" لو تبي تحفظ نسخة قبل المسح، أو تابع مباشرة.</div>
+    <div class="sheet-actions" style="margin-bottom:10px;">
+      <button class="btn btn-outline btn-block" onclick="exportBackup();confirmResetData('${level}');">💾 نسخة احتياطية أولاً</button>
+    </div>
+    <div class="sheet-actions">
+      <button class="btn btn-outline" onclick="openResetData()">تراجع</button>
+      <button class="btn btn-ghost-alert" onclick="performReset('${level}')">تأكيد المسح</button>
+    </div>
+  `;
+}
+
+async function performReset(level){
+  invoices = []; customers = []; customerTx = []; draftOrders = []; expenses = [];
+  suppliers = []; supplierTx = []; inventoryLog = []; loginLog = [];
+  const saveOps = [
+    saveInvoices(), saveCustomers(), saveCustomerTx(), saveDraftOrders(),
+    saveExpenses(), saveSuppliers(), saveSupplierTx(), saveInventoryLog()
+  ];
+  localStorage.setItem(STORAGE_PREFIX + 'loginLog', JSON.stringify(loginLog));
+
+  if(level === 'all'){
+    products = [];
+    cart = {};
+    saveOps.push(saveProducts());
+  }
+
+  await Promise.all(saveOps);
+  renderAll();
+  closeOverlay();
+  showToast('تم البدء من جديد بنجاح');
 }
 
 function openBackup(){
@@ -3704,6 +3831,16 @@ function openSettings(){
         : `<button class="btn btn-brass" onclick="enableFingerprint()">تفعيل</button>`}
     </div>
     ` : ''}
+
+    <div class="section-title"><span>منطقة الخطر</span></div>
+    <div class="ledger" style="margin-bottom:14px;">
+      <div class="row" style="cursor:pointer;" onclick="openResetData()">
+        <div class="row-main">
+          <div class="row-name" style="color:var(--alert);">🗑 البدء من جديد</div>
+          <div class="row-sub">مسح بيانات التجربة أو كل شيء</div>
+        </div>
+      </div>
+    </div>
 
     <div class="sheet-actions">
       <button class="btn btn-brass btn-block" onclick="saveSettingsForm()">حفظ</button>
