@@ -4424,9 +4424,30 @@ async function saveSettingsForm(){
 }
 
 /* ================= Overlay ================= */
-function openOverlay(){ document.getElementById('overlay').classList.add('active'); }
-function closeOverlay(){ document.getElementById('overlay').classList.remove('active'); }
+let overlayHistoryPushed = false;
+
+function openOverlay(){
+  document.getElementById('overlay').classList.add('active');
+  if(!overlayHistoryPushed){
+    history.pushState({ modal: true }, '', location.href);
+    overlayHistoryPushed = true;
+  }
+}
+function closeOverlay(){
+  if(overlayHistoryPushed){
+    overlayHistoryPushed = false;
+    history.back();
+  }else{
+    document.getElementById('overlay').classList.remove('active');
+  }
+}
 function closeOverlayIfBackdrop(e){ if(e.target.id==='overlay') closeOverlay(); }
+
+window.addEventListener('popstate', function(){
+  overlayHistoryPushed = false;
+  const ov = document.getElementById('overlay');
+  if(ov) ov.classList.remove('active');
+});
 
 /* ================= Init ================= */
 loadAll();
