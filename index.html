@@ -1237,8 +1237,18 @@ function showToast(msg){
 }
 
 /* ================= Screen switching ================= */
+let currentScreenState = 'home';
+
 function switchScreen(name){
   if(isLimitedMode() && name !== 'orders' && name !== 'sell') name = 'sell';
+  if(name !== currentScreenState){
+    history.pushState({ screen: name }, '', location.href);
+    currentScreenState = name;
+  }
+  applyScreenSwitch(name);
+}
+
+function applyScreenSwitch(name){
   document.querySelectorAll('.screen').forEach(s=>s.classList.remove('active'));
   document.getElementById('screen-'+name).classList.add('active');
   document.querySelectorAll('.nav-btn').forEach(b=>b.classList.remove('active'));
@@ -4443,10 +4453,17 @@ function closeOverlay(){
 }
 function closeOverlayIfBackdrop(e){ if(e.target.id==='overlay') closeOverlay(); }
 
-window.addEventListener('popstate', function(){
-  overlayHistoryPushed = false;
+window.addEventListener('popstate', function(e){
   const ov = document.getElementById('overlay');
+  const overlayWasOpen = ov && ov.classList.contains('active');
+  overlayHistoryPushed = false;
   if(ov) ov.classList.remove('active');
+
+  if(overlayWasOpen) return; // this back press only closed the overlay
+
+  const targetScreen = (e.state && e.state.screen) ? e.state.screen : 'home';
+  currentScreenState = targetScreen;
+  applyScreenSwitch(targetScreen);
 });
 
 /* ================= Init ================= */
