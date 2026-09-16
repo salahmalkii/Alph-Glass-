@@ -1397,11 +1397,30 @@ function renderInventory(){
   if(q){
     const nameMatches = filtered.filter(p=>p.name.toLowerCase().includes(q));
     const nameMatchIds = new Set(nameMatches.map(p=>p.id));
+    const matchingGroups = compatGroups.filter(g=>g.models.some(m=>m.toLowerCase().includes(q)));
+
     const groupMatches = filtered.filter(p=>{
-      if(nameMatchIds.has(p.id) || !p.compatGroupId) return false;
-      const grp = compatGroups.find(g=>g.id===p.compatGroupId);
-      if(!grp) return false;
-      const matchedModel = grp.models.find(m=>m.toLowerCase().includes(q));
+      if(nameMatchIds.has(p.id)) return false;
+      let matchedModel = null;
+
+      // 1) Explicit link via the product's compatGroupId field
+      if(p.compatGroupId){
+        const grp = compatGroups.find(g=>g.id===p.compatGroupId);
+        if(grp) matchedModel = grp.models.find(m=>m.toLowerCase().includes(q));
+      }
+
+      // 2) Automatic detection: does the product's own name mention another
+      //    model from a group that matches the search term?
+      if(!matchedModel){
+        for(const grp of matchingGroups){
+          const nameHasOtherModel = grp.models.some(m => p.name.toLowerCase().includes(m.toLowerCase()));
+          if(nameHasOtherModel){
+            matchedModel = grp.models.find(m=>m.toLowerCase().includes(q));
+            if(matchedModel) break;
+          }
+        }
+      }
+
       if(matchedModel){ compatMatchInfo[p.id] = matchedModel; return true; }
       return false;
     });
