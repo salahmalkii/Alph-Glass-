@@ -575,11 +575,11 @@
       <div class="lbl">مبيعات اليوم</div>
       <div class="val mono" id="todaySales">0</div>
     </div>
-    <div class="today-card">
+    <div class="today-card" id="todayProfitCard">
       <div class="lbl">ربح اليوم</div>
       <div class="val mono" id="todayProfit">0</div>
     </div>
-    <div class="today-card">
+    <div class="today-card" id="lowStockCard">
       <div class="lbl">أصناف منخفضة</div>
       <div class="val mono" id="lowStockCount">0</div>
     </div>
@@ -788,6 +788,7 @@
         <div class="l">إجمالي الديون المستحقة</div>
       </div>
     </div>
+    <div class="chip-row" id="custTagChips" style="display:none;"></div>
     <div class="search-bar">
       <input type="text" id="custSearch" placeholder="ابحث عن عميل..." oninput="renderCustomers()">
     </div>
@@ -828,7 +829,7 @@
 </div>
 
 <div id="limitedModeBanner" class="no-print" style="display:none;position:fixed;bottom:78px;right:14px;left:14px;background:var(--alert-bg);border:1px solid var(--alert);border-radius:14px;padding:10px 14px;align-items:center;justify-content:space-between;z-index:16;">
-  <div style="font-size:12.5px;color:var(--alert);font-weight:700;">🔒 وضع محدود — الطلبيات فقط</div>
+  <div style="font-size:12.5px;color:var(--alert);font-weight:700;">🔒 وضع محدود — بيع وطلبيات فقط</div>
   <button class="btn btn-outline" style="padding:6px 12px;font-size:12px;" onclick="exitLimitedMode()">خروج</button>
 </div>
 
@@ -869,6 +870,7 @@ let storageReady = false;
 let invFilter = 'all';
 let posFilter = 'all';
 let custSearchFilter = '';
+let custTagFilter = '';
 let checkoutPaymentMethod = 'cash'; // 'cash' | 'credit'
 let checkoutCustomerId = null;
 let checkoutPaidNow = '';
@@ -1055,10 +1057,15 @@ function enterLimitedMode(){
   renderAll();
   document.getElementById('headerSearchBtn').style.display = 'none';
   document.getElementById('headerHomeBtn').style.display = 'none';
-  document.querySelectorAll('nav .nav-btn').forEach(b=>{ if(b.dataset.screen !== 'orders') b.style.display = 'none'; });
+  document.getElementById('todayProfitCard').style.display = 'none';
+  document.getElementById('lowStockCard').style.display = 'none';
+  document.querySelectorAll('nav .nav-btn').forEach(b=>{
+    const s = b.dataset.screen;
+    b.style.display = (s === 'orders' || s === 'sell') ? '' : 'none';
+  });
   document.getElementById('fabBtn').style.display = 'none';
   document.getElementById('limitedModeBanner').style.display = 'flex';
-  switchScreen('orders');
+  switchScreen('sell');
 }
 
 function exitLimitedMode(){
@@ -1067,6 +1074,8 @@ function exitLimitedMode(){
   document.getElementById('limitedModeBanner').style.display = 'none';
   document.getElementById('headerSearchBtn').style.display = '';
   document.getElementById('headerHomeBtn').style.display = '';
+  document.getElementById('todayProfitCard').style.display = '';
+  document.getElementById('lowStockCard').style.display = '';
   document.querySelectorAll('nav .nav-btn').forEach(b=>{ b.style.display = ''; });
   document.getElementById('appLockScreen').style.display = 'flex';
   setTimeout(()=>document.getElementById('lockPasswordInput')?.focus(), 100);
@@ -1229,7 +1238,7 @@ function showToast(msg){
 
 /* ================= Screen switching ================= */
 function switchScreen(name){
-  if(isLimitedMode() && name !== 'orders') name = 'orders';
+  if(isLimitedMode() && name !== 'orders' && name !== 'sell') name = 'sell';
   document.querySelectorAll('.screen').forEach(s=>s.classList.remove('active'));
   document.getElementById('screen-'+name).classList.add('active');
   document.querySelectorAll('.nav-btn').forEach(b=>b.classList.remove('active'));
@@ -2626,11 +2635,27 @@ function renderCustomers(){
   document.getElementById('statTotalDebt').textContent = plainNum(totalDebt) + ' ' + settings.currency;
   renderTopCustomers();
 
+  const tagChipsEl = document.getElementById('custTagChips');
+  const tags = [...new Set(customers.map(c=>c.tag).filter(t=>t))].sort();
+  if(tagChipsEl){
+    if(tags.length > 0){
+      tagChipsEl.style.display = 'flex';
+      tagChipsEl.innerHTML = `
+        <button class="chip ${custTagFilter===''?'active':''}" onclick="setCustTagFilter('')">الكل</button>
+        ${tags.map(t=>`<button class="chip ${custTagFilter===t?'active':''}" onclick="setCustTagFilter('${escapeHtml(t)}')">${escapeHtml(t)}</button>`).join('')}
+      `;
+    }else{
+      tagChipsEl.style.display = 'none';
+      custTagFilter = '';
+    }
+  }
+
   if(customers.length === 0){
     list.innerHTML = `<div class="empty"><span class="big">👤</span>لا يوجد عملاء بعد<div class="hint">اضغط + لإضافة أول عميل وتسجيل ديونه</div></div>`;
     return;
   }
-  const filtered = customers.filter(c=>c.name.includes(q) || (c.phone||'').includes(q));
+  let filtered = customers.filter(c=>c.name.includes(q) || (c.phone||'').includes(q));
+  if(custTagFilter) filtered = filtered.filter(c=>c.tag===custTagFilter);
   if(filtered.length === 0){
     list.innerHTML = `<div class="empty">لا توجد نتائج</div>`;
     return;
@@ -2643,12 +2668,18 @@ function renderCustomers(){
       <div class="row-main">
         <div class="row-name">${escapeHtml(c.name)}</div>
         ${c.phone ? `<div class="row-sub mono">${escapeHtml(c.phone)}</div>` : ''}
+        ${c.tag ? `<span class="cat-badge other">${escapeHtml(c.tag)}</span>` : ''}
       </div>
       <div class="qty-pill ${hasDebt ? 'low' : ''}" style="${!hasDebt?'background:var(--profit-bg);color:var(--profit);':''}">
         ${hasDebt ? plainNum(c.balance) + ' ' + settings.currency : 'لا يوجد دين'}
       </div>
     </div>`;
   }).join('');
+}
+
+function setCustTagFilter(tag){
+  custTagFilter = tag;
+  renderCustomers();
 }
 
 function renderTopCustomers(){
@@ -2696,6 +2727,13 @@ function openCustomerSheet(id){
       <label>رقم الهاتف (اختياري)</label>
       <input type="tel" id="c-phone" value="${c ? escapeHtml(c.phone||'') : ''}" placeholder="05xxxxxxxx">
     </div>
+    <div class="field">
+      <label>التصنيف (اختياري — مثال: اسم المدينة)</label>
+      <input type="text" id="c-tag" list="custTagSuggestions" value="${c ? escapeHtml(c.tag||'') : ''}" placeholder="مثال: وهران">
+      <datalist id="custTagSuggestions">
+        ${[...new Set(customers.map(x=>x.tag).filter(t=>t))].map(t=>`<option value="${escapeHtml(t)}">`).join('')}
+      </datalist>
+    </div>
     <div class="sheet-actions">
       ${c ? `<button class="btn btn-ghost-alert" onclick="deleteCustomer('${c.id}')">حذف</button>` : ''}
       <button class="btn btn-brass" onclick="saveCustomerForm()">حفظ</button>
@@ -2707,13 +2745,14 @@ function openCustomerSheet(id){
 async function saveCustomerForm(){
   const name = document.getElementById('c-name').value.trim();
   const phone = document.getElementById('c-phone').value.trim();
+  const tag = document.getElementById('c-tag').value.trim() || null;
   if(!name){ showToast('أدخل اسم العميل'); return; }
 
   if(editingCustomerId){
     const c = customers.find(x=>x.id===editingCustomerId);
-    c.name = name; c.phone = phone;
+    c.name = name; c.phone = phone; c.tag = tag;
   }else{
-    customers.push({ id: uid(), name, phone, balance: 0, createdAt: new Date().toISOString() });
+    customers.push({ id: uid(), name, phone, tag, balance: 0, createdAt: new Date().toISOString() });
   }
   await saveCustomers();
   renderCustomers();
@@ -2770,6 +2809,10 @@ function openCustomerDetail(id){
           <div class="mono" style="font-weight:700;color:${isDebt?'var(--alert)':'var(--profit)'};">
             ${isDebt?'+':'−'}${plainNum(t.amount)}
           </div>
+          <div class="row-actions">
+            <button class="icon-btn" onclick="editCustomerTxForm('${t.id}')">✎</button>
+            <button class="icon-btn" onclick="confirmDeleteCustomerTx('${t.id}')">🗑</button>
+          </div>
         </div>`;
       }).join('')}
     </div>
@@ -2818,6 +2861,94 @@ async function confirmDebtForm(customerId, type){
   renderHeaderStrip();
   openCustomerDetail(customerId);
   showToast('تم الحفظ');
+}
+
+function editCustomerTxForm(txId){
+  const t = customerTx.find(x=>x.id===txId);
+  if(!t) return;
+  const sheet = document.getElementById('sheetContent');
+  sheet.innerHTML = `
+    <div class="sheet-head">
+      <h3>تعديل الحركة</h3>
+      <button class="icon-btn" onclick="openCustomerDetail('${t.customerId}')">✕</button>
+    </div>
+    <div class="field">
+      <label>النوع</label>
+      <select id="etx-type">
+        <option value="debt" ${t.type==='debt'?'selected':''}>دين جديد</option>
+        <option value="payment" ${t.type==='payment'?'selected':''}>سداد</option>
+      </select>
+    </div>
+    <div class="field">
+      <label>المبلغ</label>
+      <input type="number" inputmode="decimal" id="etx-amount" value="${t.amount}">
+    </div>
+    <div class="field">
+      <label>ملاحظة (اختياري)</label>
+      <input type="text" id="etx-note" value="${escapeHtml(t.note||'')}">
+    </div>
+    <div class="sheet-actions">
+      <button class="btn btn-outline" onclick="openCustomerDetail('${t.customerId}')">تراجع</button>
+      <button class="btn btn-brass" onclick="saveCustomerTxEdit('${t.id}')">حفظ</button>
+    </div>
+  `;
+}
+
+async function saveCustomerTxEdit(txId){
+  const t = customerTx.find(x=>x.id===txId);
+  if(!t) return;
+  const c = customers.find(x=>x.id===t.customerId);
+  const newType = document.getElementById('etx-type').value;
+  const newAmount = parseFloat(document.getElementById('etx-amount').value);
+  const newNote = document.getElementById('etx-note').value.trim();
+  if(isNaN(newAmount) || newAmount <= 0){ showToast('أدخل مبلغًا صحيحًا'); return; }
+
+  if(c){
+    c.balance -= (t.type === 'debt' ? t.amount : -t.amount);
+    c.balance += (newType === 'debt' ? newAmount : -newAmount);
+    c.balance = Math.round((c.balance + Number.EPSILON) * 100) / 100;
+  }
+  t.type = newType; t.amount = newAmount; t.note = newNote;
+
+  await Promise.all([saveCustomers(), saveCustomerTx()]);
+  renderCustomers();
+  renderHeaderStrip();
+  openCustomerDetail(t.customerId);
+  showToast('تم التعديل');
+}
+
+function confirmDeleteCustomerTx(txId){
+  const t = customerTx.find(x=>x.id===txId);
+  if(!t) return;
+  const sheet = document.getElementById('sheetContent');
+  sheet.innerHTML = `
+    <div class="sheet-head">
+      <h3>حذف الحركة</h3>
+      <button class="icon-btn" onclick="openCustomerDetail('${t.customerId}')">✕</button>
+    </div>
+    <div class="row-sub" style="margin-bottom:16px;color:var(--alert);">سيتم حذف هذي الحركة (${t.type==='debt'?'دين':'سداد'} بقيمة ${plainNum(t.amount)}) وتعديل رصيد العميل تلقائيًا.</div>
+    <div class="sheet-actions">
+      <button class="btn btn-outline" onclick="openCustomerDetail('${t.customerId}')">تراجع</button>
+      <button class="btn btn-ghost-alert" onclick="deleteCustomerTx('${t.id}')">تأكيد الحذف</button>
+    </div>
+  `;
+}
+
+async function deleteCustomerTx(txId){
+  const t = customerTx.find(x=>x.id===txId);
+  if(!t) return;
+  const c = customers.find(x=>x.id===t.customerId);
+  if(c){
+    c.balance -= (t.type === 'debt' ? t.amount : -t.amount);
+    c.balance = Math.max(0, Math.round((c.balance + Number.EPSILON) * 100) / 100);
+  }
+  customerTx = customerTx.filter(x=>x.id!==txId);
+
+  await Promise.all([saveCustomers(), saveCustomerTx()]);
+  renderCustomers();
+  renderHeaderStrip();
+  openCustomerDetail(t.customerId);
+  showToast('تم حذف الحركة');
 }
 
 
@@ -2946,6 +3077,10 @@ function openSupplierDetail(id){
           <div class="mono" style="font-weight:700;color:${isDebt?'var(--alert)':'var(--profit)'};">
             ${isDebt?'+':'−'}${plainNum(t.amount)}
           </div>
+          <div class="row-actions">
+            <button class="icon-btn" onclick="editSupplierTxForm('${t.id}')">✎</button>
+            <button class="icon-btn" onclick="confirmDeleteSupplierTx('${t.id}')">🗑</button>
+          </div>
         </div>`;
       }).join('')}
     </div>
@@ -2992,6 +3127,90 @@ async function confirmSupplierDebtForm(supplierId, type){
   await Promise.all([saveSuppliers(), saveSupplierTx()]);
   openSupplierDetail(supplierId);
   showToast('تم الحفظ');
+}
+
+function editSupplierTxForm(txId){
+  const t = supplierTx.find(x=>x.id===txId);
+  if(!t) return;
+  const sheet = document.getElementById('sheetContent');
+  sheet.innerHTML = `
+    <div class="sheet-head">
+      <h3>تعديل الحركة</h3>
+      <button class="icon-btn" onclick="openSupplierDetail('${t.supplierId}')">✕</button>
+    </div>
+    <div class="field">
+      <label>النوع</label>
+      <select id="estx-type">
+        <option value="debt" ${t.type==='debt'?'selected':''}>شراء بالدين</option>
+        <option value="payment" ${t.type==='payment'?'selected':''}>سداد</option>
+      </select>
+    </div>
+    <div class="field">
+      <label>المبلغ</label>
+      <input type="number" inputmode="decimal" id="estx-amount" value="${t.amount}">
+    </div>
+    <div class="field">
+      <label>ملاحظة (اختياري)</label>
+      <input type="text" id="estx-note" value="${escapeHtml(t.note||'')}">
+    </div>
+    <div class="sheet-actions">
+      <button class="btn btn-outline" onclick="openSupplierDetail('${t.supplierId}')">تراجع</button>
+      <button class="btn btn-brass" onclick="saveSupplierTxEdit('${t.id}')">حفظ</button>
+    </div>
+  `;
+}
+
+async function saveSupplierTxEdit(txId){
+  const t = supplierTx.find(x=>x.id===txId);
+  if(!t) return;
+  const s = suppliers.find(x=>x.id===t.supplierId);
+  const newType = document.getElementById('estx-type').value;
+  const newAmount = parseFloat(document.getElementById('estx-amount').value);
+  const newNote = document.getElementById('estx-note').value.trim();
+  if(isNaN(newAmount) || newAmount <= 0){ showToast('أدخل مبلغًا صحيحًا'); return; }
+
+  if(s){
+    s.balance -= (t.type === 'debt' ? t.amount : -t.amount);
+    s.balance += (newType === 'debt' ? newAmount : -newAmount);
+    s.balance = Math.round((s.balance + Number.EPSILON) * 100) / 100;
+  }
+  t.type = newType; t.amount = newAmount; t.note = newNote;
+
+  await Promise.all([saveSuppliers(), saveSupplierTx()]);
+  openSupplierDetail(t.supplierId);
+  showToast('تم التعديل');
+}
+
+function confirmDeleteSupplierTx(txId){
+  const t = supplierTx.find(x=>x.id===txId);
+  if(!t) return;
+  const sheet = document.getElementById('sheetContent');
+  sheet.innerHTML = `
+    <div class="sheet-head">
+      <h3>حذف الحركة</h3>
+      <button class="icon-btn" onclick="openSupplierDetail('${t.supplierId}')">✕</button>
+    </div>
+    <div class="row-sub" style="margin-bottom:16px;color:var(--alert);">سيتم حذف هذي الحركة (${t.type==='debt'?'شراء بالدين':'سداد'} بقيمة ${plainNum(t.amount)}) وتعديل رصيد المورد تلقائيًا.</div>
+    <div class="sheet-actions">
+      <button class="btn btn-outline" onclick="openSupplierDetail('${t.supplierId}')">تراجع</button>
+      <button class="btn btn-ghost-alert" onclick="deleteSupplierTx('${t.id}')">تأكيد الحذف</button>
+    </div>
+  `;
+}
+
+async function deleteSupplierTx(txId){
+  const t = supplierTx.find(x=>x.id===txId);
+  if(!t) return;
+  const s = suppliers.find(x=>x.id===t.supplierId);
+  if(s){
+    s.balance -= (t.type === 'debt' ? t.amount : -t.amount);
+    s.balance = Math.max(0, Math.round((s.balance + Number.EPSILON) * 100) / 100);
+  }
+  supplierTx = supplierTx.filter(x=>x.id!==txId);
+
+  await Promise.all([saveSuppliers(), saveSupplierTx()]);
+  openSupplierDetail(t.supplierId);
+  showToast('تم حذف الحركة');
 }
 
 /* ================= Purchase List (from low stock) ================= */
@@ -4114,7 +4333,7 @@ function openSettings(){
 
     ${settings.appPassword ? `
     <div class="section-title"><span>وصول محدود (لصديقك أو موظفك)</span></div>
-    <div class="row-sub" style="margin-bottom:10px;">رمز دخول منفصل يفتح شاشة "الطلبيات" فقط — بدون أي وصول للأرباح، الأسعار، المخزون، أو باقي البيانات.</div>
+    <div class="row-sub" style="margin-bottom:10px;">رمز دخول منفصل يفتح شاشتي "بيع" و"الطلبيات" فقط — بدون أي وصول للأرباح، المخزون، الإحصائيات، أو باقي البيانات.</div>
     <div class="field" style="margin-bottom:14px;">
       <label>كلمة مرور الوصول المحدود ${settings.limitedPassword ? '(مفعّلة حاليًا)' : '(غير مفعّلة)'}</label>
       <input type="password" id="s-limited-password" placeholder="${settings.limitedPassword ? '•••••• (اتركه فارغًا للإبقاء عليها)' : 'اكتب كلمة مرور للتفعيل'}">
