@@ -1,7 +1,6 @@
 <!DOCTYPE html>
 <html lang="ar" dir="rtl">
 <head>
-<link rel="manifest" href="./manifest.json">
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Alpha Glass</title>
@@ -604,12 +603,35 @@
         <div class="l">القيمة عند البيع</div>
       </div>
     </div>
+    <div class="stat-grid">
+      <div class="stat-card" style="flex:1 1 100%;">
+        <div class="v mono" id="statInvTotalPieces">0</div>
+        <div class="l">إجمالي عدد القطع بالمخزون</div>
+      </div>
+    </div>
     <div class="chip-row" id="invChips">
       <button class="chip active" data-cat="all" onclick="setInvFilter('all')">الكل</button>
       <button class="chip" data-cat="low" onclick="setInvFilter('low')">⚠ منخفض</button>
       <button class="chip" data-cat="glass" onclick="setInvFilter('glass')">زجاج حماية</button>
       <button class="chip" data-cat="acc" onclick="setInvFilter('acc')">إكسسوارات</button>
       <button class="chip" data-cat="other" onclick="setInvFilter('other')">أخرى</button>
+    </div>
+    <div class="field" id="invBrandFilterWrap" style="margin-bottom:14px;display:none;">
+      <label>تصفية حسب الشركة</label>
+      <select id="invBrandFilter" onchange="renderInventory()">
+        <option value="">كل الشركات</option>
+      </select>
+    </div>
+    <div class="field" style="margin-bottom:14px;">
+      <label>ترتيب</label>
+      <select id="invSortBy" onchange="renderInventory()">
+        <option value="name-asc">الاسم (أ ← ي / تصاعدي)</option>
+        <option value="name-desc">الاسم (ي ← أ / تنازلي)</option>
+        <option value="qty-asc">الكمية (الأقل أولاً)</option>
+        <option value="qty-desc">الكمية (الأكثر أولاً)</option>
+        <option value="price-asc">السعر (الأقل أولاً)</option>
+        <option value="price-desc">السعر (الأكثر أولاً)</option>
+      </select>
     </div>
     <div class="search-bar">
       <input type="text" id="invSearch" placeholder="ابحث عن صنف... (مثال: 9A)" oninput="renderInventory()">
@@ -841,7 +863,7 @@ let products = [];
 let invoices = [];
 let customers = [];
 let customerTx = [];
-let settings = { shopName: "Alpha Glass", currency: "ر.س", hideProfit: false, profitPin: "", shopPhone: "", appPassword: "", fingerprintCredentialId: "" };
+let settings = { shopName: "Alpha Glass", currency: "ر.س", hideProfit: false, profitPin: "", shopPhone: "", appPassword: "", fingerprintCredentialId: "", friendPhone: "" };
 let cart = {}; // productId -> qty
 let cartOverride = {}; // productId -> edited price for current checkout
 let editingProductId = null;
@@ -873,6 +895,7 @@ let editingGroupId = null;
 let loginLog = [];
 
 const catLabel = { glass: 'زجاج حماية', acc: 'إكسسوارات', other: 'أخرى' };
+const glassTypeLabel = { esd: 'ESD', uv: 'UV', bordure: 'بدون حواف', fume: 'مدخّن' };
 
 function setInvFilter(cat){
   invFilter = cat;
@@ -1199,18 +1222,62 @@ function renderInventory(){
 
   const totalCost = products.reduce((a,p)=>a + p.qty*p.buyPrice, 0);
   const totalSaleValue = products.reduce((a,p)=>a + p.qty*p.sellPrice, 0);
+  const totalPieces = products.reduce((a,p)=>a + p.qty, 0);
   document.getElementById('statInvCost').textContent = settings.hideProfit ? '•••' : plainNum(totalCost);
   document.getElementById('statInvSaleValue').textContent = plainNum(totalSaleValue);
+  document.getElementById('statInvTotalPieces').textContent = totalPieces;
   const invCostCard = document.getElementById('invCostCard');
   if(invCostCard) invCostCard.style.display = settings.hideProfit ? 'none' : '';
+
+  const brands = [...new Set(products.map(p=>p.brand).filter(b=>b))].sort();
+  const brandWrap = document.getElementById('invBrandFilterWrap');
+  const brandSelect = document.getElementById('invBrandFilter');
+  if(brandWrap && brandSelect){
+    if(brands.length > 0){
+      brandWrap.style.display = '';
+      const curVal = brandSelect.value;
+      brandSelect.innerHTML = `<option value="">كل الشركات</option>` + brands.map(b=>`<option value="${escapeHtml(b)}" ${curVal===b?'selected':''}>${escapeHtml(b)}</option>`).join('');
+    }else{
+      brandWrap.style.display = 'none';
+    }
+  }
 
   if(products.length === 0){
     list.innerHTML = `<div class="empty"><span class="big">📦</span>لا توجد أصناف بعد<div class="hint">اضغط + لإضافة أول صنف في مخزونك</div></div>`;
     return;
   }
   const q = (document.getElementById('invSearch')?.value || '').trim().toLowerCase();
+  const brandFilter = document.getElementById('invBrandFilter')?.value || '';
   let filtered = invFilter==='all' ? products : (invFilter==='low' ? products.filter(p=>p.qty<=LOW_STOCK_THRESHOLD) : products.filter(p=>(p.category||'other')===invFilter));
-  if(q) filtered = filtered.filter(p=>p.name.toLowerCase().includes(q));
+  if(brandFilter) filtered = filtered.filter(p=>p.brand===brandFilter);
+
+  let compatMatchInfo = {};
+  if(q){
+    const nameMatches = filtered.filter(p=>p.name.toLowerCase().includes(q));
+    const nameMatchIds = new Set(nameMatches.map(p=>p.id));
+    const groupMatches = filtered.filter(p=>{
+      if(nameMatchIds.has(p.id) || !p.compatGroupId) return false;
+      const grp = compatGroups.find(g=>g.id===p.compatGroupId);
+      if(!grp) return false;
+      const matchedModel = grp.models.find(m=>m.toLowerCase().includes(q));
+      if(matchedModel){ compatMatchInfo[p.id] = matchedModel; return true; }
+      return false;
+    });
+    filtered = [...nameMatches, ...groupMatches];
+  }
+
+  const sortBy = document.getElementById('invSortBy')?.value || 'name-asc';
+  filtered = [...filtered].sort((a,b)=>{
+    switch(sortBy){
+      case 'name-desc': return b.name.localeCompare(a.name, undefined, {numeric:true, sensitivity:'base'});
+      case 'qty-asc': return a.qty - b.qty;
+      case 'qty-desc': return b.qty - a.qty;
+      case 'price-asc': return a.sellPrice - b.sellPrice;
+      case 'price-desc': return b.sellPrice - a.sellPrice;
+      default: return a.name.localeCompare(b.name, undefined, {numeric:true, sensitivity:'base'});
+    }
+  });
+
   if(filtered.length === 0){
     list.innerHTML = `<div class="empty">لا توجد أصناف مطابقة</div>`;
     return;
@@ -1225,7 +1292,10 @@ function renderInventory(){
         <div class="row-name">${escapeHtml(p.name)}</div>
         ${settings.hideProfit ? '' : `<div class="row-sub">هامش الربح: ${plainNum(p.sellPrice - p.buyPrice)} ${settings.currency}</div>`}
         <span class="cat-badge ${cat}">${catLabel[cat]}</span>
+        ${p.brand ? `<span class="cat-badge other" style="margin-right:4px;">${escapeHtml(p.brand)}</span>` : ''}
+        ${p.glassType ? `<span class="cat-badge glass" style="margin-right:4px;">${escapeHtml(glassTypeLabel[p.glassType] || p.glassType)}</span>` : ''}
         ${grp ? `<span class="cat-badge other" style="margin-right:4px;">🧩 ${escapeHtml(grp.name)}</span>` : ''}
+        ${compatMatchInfo[p.id] ? `<div class="row-sub" style="color:var(--accent-b);margin-top:4px;">🧩 متوافق مع "${escapeHtml(compatMatchInfo[p.id])}" اللي بحثت عنه</div>` : ''}
       </div>
       <div class="qty-pill ${low?'low':''}">${p.qty} قطعة</div>
       <div class="price-col">
@@ -1259,11 +1329,28 @@ function openProductSheet(id){
     </div>
     <div class="field">
       <label>الفئة</label>
-      <select id="f-cat">
+      <select id="f-cat" onchange="toggleGlassTypeField()">
         <option value="glass" ${p && p.category==='glass' ? 'selected':''}>زجاج حماية</option>
         <option value="acc" ${p && p.category==='acc' ? 'selected':''}>إكسسوارات</option>
         <option value="other" ${!p || p.category==='other' ? 'selected':''}>أخرى</option>
       </select>
+    </div>
+    <div class="field" id="f-glasstype-wrap" style="display:none;">
+      <label>نوع الزجاج</label>
+      <select id="f-glasstype">
+        <option value="">— بدون —</option>
+        <option value="esd" ${p && p.glassType==='esd' ? 'selected':''}>ESD (مضاد للكهرباء الساكنة)</option>
+        <option value="uv" ${p && p.glassType==='uv' ? 'selected':''}>UV (لاصق كامل بالأشعة فوق البنفسجية)</option>
+        <option value="bordure" ${p && p.glassType==='bordure' ? 'selected':''}>بدون حواف (حافة لحافة)</option>
+        <option value="fume" ${p && p.glassType==='fume' ? 'selected':''}>مدخّن (Fumé)</option>
+      </select>
+    </div>
+    <div class="field">
+      <label>الشركة المصنّعة (اختياري)</label>
+      <input type="text" id="f-brand" list="brandSuggestions" value="${p && p.brand ? escapeHtml(p.brand) : ''}" placeholder="مثال: Samsung">
+      <datalist id="brandSuggestions">
+        ${[...new Set(products.map(x=>x.brand).filter(b=>b))].map(b=>`<option value="${escapeHtml(b)}">`).join('')}
+      </datalist>
     </div>
     <div class="field">
       <label>المجموعة التوافقية (اختياري)</label>
@@ -1307,6 +1394,13 @@ function openProductSheet(id){
   `;
   openOverlay();
   recalcProductSummary();
+  toggleGlassTypeField();
+}
+
+function toggleGlassTypeField(){
+  const cat = document.getElementById('f-cat')?.value;
+  const wrap = document.getElementById('f-glasstype-wrap');
+  if(wrap) wrap.style.display = (cat === 'glass') ? '' : 'none';
 }
 
 function recalcProductSummary(){
@@ -1328,6 +1422,8 @@ async function saveProductForm(){
   const qty = parseInt(document.getElementById('f-qty').value);
   const category = document.getElementById('f-cat').value;
   const compatGroupId = document.getElementById('f-group').value || null;
+  const brand = document.getElementById('f-brand').value.trim() || null;
+  const glassType = category === 'glass' ? (document.getElementById('f-glasstype').value || null) : null;
 
   if(!name){ showToast('أدخل اسم الصنف'); return; }
   if(isNaN(buy) || isNaN(sell) || isNaN(qty) || buy<0 || sell<0 || qty<0){
@@ -1341,12 +1437,12 @@ async function saveProductForm(){
     if(p.buyPrice !== buy) logOps.push({ field: 'سعر الشراء', oldValue: p.buyPrice, newValue: buy });
     if(p.sellPrice !== sell) logOps.push({ field: 'سعر البيع', oldValue: p.sellPrice, newValue: sell });
     if(p.qty !== qty) logOps.push({ field: 'الكمية', oldValue: p.qty, newValue: qty });
-    p.name = name; p.buyPrice = buy; p.sellPrice = sell; p.qty = qty; p.category = category; p.compatGroupId = compatGroupId;
+    p.name = name; p.buyPrice = buy; p.sellPrice = sell; p.qty = qty; p.category = category; p.compatGroupId = compatGroupId; p.brand = brand; p.glassType = glassType;
     logOps.forEach(op=>{
       inventoryLog.unshift({ id: uid(), productId: p.id, productName: name, field: op.field, oldValue: op.oldValue, newValue: op.newValue, date: new Date().toISOString() });
     });
   }else{
-    products.push({ id: uid(), name, buyPrice: buy, sellPrice: sell, qty, category, compatGroupId });
+    products.push({ id: uid(), name, buyPrice: buy, sellPrice: sell, qty, category, compatGroupId, brand, glassType });
   }
   await saveProducts();
   if(logOps.length > 0) await saveInventoryLog();
@@ -1441,7 +1537,10 @@ function renderPosCustomerBanner(){
       </div>
       <button class="icon-btn" onclick="clearOrderCustomer()">✕</button>
     </div>
-    ${orderDraftMode ? `<div class="row-sub" style="margin-bottom:14px;">حدد الأصناف اللي يحتاجها، ثم احفظها كطلبية بدون خصم من المخزون أو إصدار فاتورة الآن.</div>` : ''}
+    ${orderDraftMode ? `<div class="row-sub" style="margin-bottom:10px;">حدد الأصناف اللي يحتاجها، ثم احفظها كطلبية بدون خصم من المخزون أو إصدار فاتورة الآن.</div>
+    <div class="sheet-actions" style="margin-bottom:14px;">
+      <button class="btn btn-block" style="background:#25D366;color:#fff;" onclick="shareAvailableWithCustomer('${c.id}')">📤 إرسال المتوفر عندي له</button>
+    </div>` : ''}
     ${lastInvoice ? `
     <div class="row" style="background:var(--surface);border:1px solid var(--border);border-radius:14px;margin-bottom:14px;cursor:pointer;" onclick="addLastOrderToCart('${c.id}')">
       <div class="row-main">
@@ -1450,6 +1549,20 @@ function renderPosCustomerBanner(){
       </div>
     </div>` : ''}
   `;
+}
+
+function shareAvailableWithCustomer(customerId){
+  const c = customers.find(x=>x.id===customerId);
+  const glassText = buildCatalogText('glass');
+  const otherText = buildCatalogText('other');
+  const parts = [glassText, otherText].filter(t=>t);
+  if(parts.length === 0){ showToast('لا توجد أصناف متوفرة حاليًا'); return; }
+  const combined = parts.join('\n\n————————\n\n');
+
+  const text = encodeURIComponent(combined);
+  const phone = c && c.phone ? c.phone.replace(/[^0-9]/g,'') : '';
+  const url = phone ? `https://wa.me/${phone}?text=${text}` : `https://wa.me/?text=${text}`;
+  window.open(url, '_blank');
 }
 
 function selectPosCustomer(id){
@@ -3499,7 +3612,9 @@ function shareDraftOrderWhatsApp(orderId){
   lines.push('جهّزها لو سمحت 🙏');
 
   const text = encodeURIComponent(lines.join('\n'));
-  window.open(`https://wa.me/?text=${text}`, '_blank');
+  const phone = (settings.friendPhone || '').replace(/[^0-9]/g,'');
+  const url = phone ? `https://wa.me/${phone}?text=${text}` : `https://wa.me/?text=${text}`;
+  window.open(url, '_blank');
 }
 
 async function deleteDraftOrder(orderId){
@@ -3525,6 +3640,10 @@ function openSettings(){
     <div class="field">
       <label>رقم الهاتف (يظهر في الفاتورة)</label>
       <input type="tel" id="s-shopphone" value="${escapeHtml(settings.shopPhone||'')}" placeholder="05xxxxxxxx">
+    </div>
+    <div class="field">
+      <label>رقم هاتف صديقك (لإرسال الطلبيات مباشرة له)</label>
+      <input type="tel" id="s-friendphone" value="${escapeHtml(settings.friendPhone||'')}" placeholder="213xxxxxxxxx (مع رمز الدولة، بدون +)">
     </div>
     <div class="field">
       <label>رمز العملة</label>
@@ -3609,6 +3728,7 @@ async function saveSettingsForm(){
 
   settings.shopName = name;
   settings.shopPhone = document.getElementById('s-shopphone').value.trim();
+  settings.friendPhone = document.getElementById('s-friendphone').value.trim();
   settings.currency = cur;
   settings.hideProfit = newHide;
 
@@ -3637,10 +3757,6 @@ function closeOverlayIfBackdrop(e){ if(e.target.id==='overlay') closeOverlay(); 
 
 /* ================= Init ================= */
 loadAll();
-</script>
-
-<script>
-if ('serviceWorker' in navigator) { window.addEventListener('load', () => navigator.serviceWorker.register('./sw.js')); }
 </script>
 </body>
 </html>
