@@ -2420,12 +2420,14 @@ async function shareInvoiceAsImage(inv){
   const padding = 20;
   const lineHeight = 26;
 
+  const typeBreakdownForHeight = getInvoiceTypeBreakdown(inv);
   let height = 90;
   height += 66; // logo
   if(settings.shopPhone) height += 18;
   height += 20;
   height += inv.items.length * lineHeight;
   height += 20; // total pieces line
+  height += typeBreakdownForHeight.length * 16; // type breakdown lines
   height += 24;
   if(inv.discountAmount > 0) height += 44;
   height += 34;
@@ -2497,7 +2499,14 @@ async function shareInvoiceAsImage(inv){
   ctx.fillStyle = '#777777';
   ctx.textAlign = 'right';
   ctx.fillText(`إجمالي القطع: ${totalPiecesImg}`, width - padding, y);
-  y += 20;
+  y += 18;
+
+  const typeBreakdownImg = getInvoiceTypeBreakdown(inv);
+  typeBreakdownImg.forEach(([t,q])=>{
+    ctx.fillText(`${t}: ${q}`, width - padding, y);
+    y += 16;
+  });
+  y += 2;
 
   drawDashedLine(ctx, padding, y, width - padding, y);
   y += 22;
@@ -2561,6 +2570,18 @@ async function shareInvoiceAsImage(inv){
   }, 'image/png');
 }
 
+function getInvoiceTypeBreakdown(inv){
+  const typeQty = {};
+  inv.items.forEach(it=>{
+    const realProduct = it.productId ? products.find(x=>x.id===it.productId) : null;
+    if(realProduct && realProduct.glassType){
+      const typeLabel = glassTypeLabel[realProduct.glassType] || realProduct.glassType;
+      typeQty[typeLabel] = (typeQty[typeLabel] || 0) + it.qty;
+    }
+  });
+  return Object.entries(typeQty).sort((a,b)=> b[1]-a[1]);
+}
+
 function shareInvoiceWhatsApp(inv){
   const cust = inv.customerId ? customers.find(c=>c.id===inv.customerId) : null;
   const lines = [];
@@ -2573,6 +2594,10 @@ function shareInvoiceWhatsApp(inv){
   });
   const totalPiecesShare = inv.items.reduce((a,it)=>a+it.qty, 0);
   lines.push(`إجمالي القطع: ${totalPiecesShare}`);
+  const typeBreakdownShare = getInvoiceTypeBreakdown(inv);
+  if(typeBreakdownShare.length > 0){
+    typeBreakdownShare.forEach(([t,q])=>{ lines.push(`${t}: ${q}`); });
+  }
   if(inv.discountAmount > 0){
     lines.push('');
     lines.push(`المجموع: ${plainNum(inv.rawTotal)}`);
@@ -2676,18 +2701,47 @@ function openInvoiceEditForm(invoiceId){
   const inv = invoices.find(x=>x.id===invoiceId);
   if(!inv) return;
   const sheet = document.getElementById('sheetContent');
+
+  const typeGroups = {};
+  inv.items.forEach(it=>{
+    const realProduct = it.productId ? products.find(x=>x.id===it.productId) : null;
+    if(realProduct && realProduct.glassType){
+      const typeLabel = glassTypeLabel[realProduct.glassType] || realProduct.glassType;
+      typeGroups[typeLabel] = (typeGroups[typeLabel] || 0) + 1;
+    }
+  });
+  const typeNames = Object.keys(typeGroups).filter(t=>typeGroups[t] > 1);
+
   sheet.innerHTML = `
     <div class="sheet-head">
       <h3>تعديل فاتورة #${inv.number}</h3>
       <button class="icon-btn" onclick='showInvoicePreview(${JSON.stringify(inv).replace(/'/g,"&#39;")}, false)'>✕</button>
     </div>
     <div class="row-sub" style="margin-bottom:12px;">غيّر الكمية (لتسجيل إرجاع) أو السعر (لتعديل أو تخفيض قيمة الصنف). سيُعاد فرق الكمية للمخزون تلقائيًا.</div>
+    ${typeNames.length > 0 ? `
+    <div class="section-title"><span>تعديل السعر حسب النوع (لعدة أصناف دفعة وحدة)</span></div>
     <div class="ledger" style="margin-bottom:14px;">
-      ${inv.items.map((it,idx)=>`
+      ${typeNames.map(t=>`
+        <div class="row">
+          <div class="row-main"><div class="row-name">${escapeHtml(t)} (${typeGroups[t]} أصناف)</div></div>
+          <div style="width:80px;">
+            <input type="number" inputmode="decimal" class="mono" id="bulk-price-${escapeHtml(t).replace(/[^a-zA-Z0-9]/g,'')}" placeholder="سعر جديد" min="0" step="0.01"
+              style="width:100%;padding:8px 4px;border-radius:8px;border:1.5px solid var(--border-strong);background:var(--surface-soft);color:var(--text);font-size:13px;text-align:center;">
+          </div>
+          <button class="icon-btn" onclick='applyBulkPriceForType(${JSON.stringify(inv.items).replace(/'/g,"&#39;")}, "${escapeHtml(t)}", document.getElementById("bulk-price-${escapeHtml(t).replace(/[^a-zA-Z0-9]/g,'')}").value)'>✓</button>
+        </div>
+      `).join('')}
+    </div>
+    ` : ''}
+    <div class="ledger" style="margin-bottom:14px;">
+      ${inv.items.map((it,idx)=>{
+        const realProduct = it.productId ? products.find(x=>x.id===it.productId) : null;
+        const typeLabel = realProduct && realProduct.glassType ? (glassTypeLabel[realProduct.glassType] || realProduct.glassType) : null;
+        return `
         <div class="row">
           <div class="row-main">
             <div class="row-name">${escapeHtml(it.name)}</div>
-            <div class="row-sub">الكمية</div>
+            <div class="row-sub">${typeLabel ? typeLabel + ' — ' : ''}الكمية</div>
           </div>
           <div style="width:60px;">
             <input type="number" inputmode="numeric" class="mono" id="edit-qty-${idx}" value="${it.qty}" min="0" max="${it.qty}"
@@ -2699,13 +2753,28 @@ function openInvoiceEditForm(invoiceId){
               style="width:100%;padding:8px 4px;border-radius:8px;border:1.5px solid var(--border-strong);background:var(--surface-soft);color:var(--text);font-size:13px;text-align:center;">
           </div>
         </div>
-      `).join('')}
+      `;}).join('')}
     </div>
     <div class="sheet-actions">
       <button class="btn btn-outline" onclick='showInvoicePreview(${JSON.stringify(inv).replace(/'/g,"&#39;")}, false)'>تراجع</button>
       <button class="btn btn-brass" onclick="saveInvoiceEditForm('${inv.id}')">حفظ التعديلات</button>
     </div>
   `;
+}
+
+function applyBulkPriceForType(items, typeLabel, newPriceStr){
+  const newPrice = parseFloat(newPriceStr);
+  if(isNaN(newPrice) || newPrice < 0){ showToast('أدخل سعرًا صحيحًا'); return; }
+  let count = 0;
+  items.forEach((it, idx)=>{
+    const realProduct = it.productId ? products.find(x=>x.id===it.productId) : null;
+    const itemType = realProduct && realProduct.glassType ? (glassTypeLabel[realProduct.glassType] || realProduct.glassType) : null;
+    if(itemType === typeLabel){
+      const priceInput = document.getElementById('edit-price-' + idx);
+      if(priceInput){ priceInput.value = newPrice; count++; }
+    }
+  });
+  showToast(`تم تحديث سعر ${count} صنف من نوع ${typeLabel} — اضغط "حفظ التعديلات" لتثبيت التغيير`);
 }
 
 async function saveInvoiceEditForm(invoiceId){
