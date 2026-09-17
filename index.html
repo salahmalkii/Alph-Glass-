@@ -4835,8 +4835,8 @@ function loadDraftOrderToCart(orderId){
   posCustomerId = order.customerId;
   orderDraftMode = false;
   editingDraftOrderId = order.id;
-  closeOverlay();
   switchScreen('sell');
+  openCheckout();
   if(skipped > 0) showToast('بعض أصناف الطلبية لم تعد متوفرة بالمخزون');
 }
 
