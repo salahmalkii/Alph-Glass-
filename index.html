@@ -793,6 +793,9 @@
         <div class="l">إجمالي الديون المستحقة</div>
       </div>
     </div>
+    <div class="sheet-actions" style="margin-bottom:14px;">
+      <button class="btn btn-outline btn-block" onclick="exportCustomerContacts()">📇 حفظ كل الأرقام كجهات اتصال</button>
+    </div>
     <div class="chip-row" id="custTagChips" style="display:none;"></div>
     <div class="search-bar">
       <input type="text" id="custSearch" placeholder="ابحث عن عميل..." oninput="renderCustomers()">
@@ -918,6 +921,13 @@ function matchesModel(text, model){
 
 function normalizeModelStr(s){
   return (s || '').trim().toLowerCase().replace(/[\s\-_]+/g, '');
+}
+
+function formatPhoneForWhatsApp(phone){
+  let digits = (phone || '').replace(/[^0-9]/g, '');
+  if(!digits) return '';
+  if(digits.startsWith('0')) digits = '213' + digits.slice(1);
+  return digits;
 }
 function isExactModel(model, query){
   return normalizeModelStr(model) === normalizeModelStr(query);
@@ -1748,17 +1758,47 @@ function renderPosCustomerBanner(){
 }
 
 function shareAvailableWithCustomer(customerId){
+  const sheet = document.getElementById('sheetContent');
+  sheet.innerHTML = `
+    <div class="sheet-head">
+      <h3>إرسال المتوفر للعميل</h3>
+      <button class="icon-btn" onclick="closeOverlay()">✕</button>
+    </div>
+    <div class="row-sub" style="margin-bottom:16px;">وش تحب ترسل له؟</div>
+    <div class="ledger">
+      <div class="row" style="cursor:pointer;" onclick="sendAvailableCatalog('${customerId}', 'glass')">
+        <div class="row-main"><div class="row-name">🛡 زجاج حماية فقط</div></div>
+      </div>
+      <div class="row" style="cursor:pointer;" onclick="sendAvailableCatalog('${customerId}', 'other')">
+        <div class="row-main"><div class="row-name">🎧 إكسسوارات فقط</div></div>
+      </div>
+      <div class="row" style="cursor:pointer;" onclick="sendAvailableCatalog('${customerId}', 'all')">
+        <div class="row-main"><div class="row-name">📦 كل شيء</div></div>
+      </div>
+    </div>
+  `;
+  openOverlay();
+}
+
+function sendAvailableCatalog(customerId, which){
   const c = customers.find(x=>x.id===customerId);
-  const glassText = buildCatalogText('glass');
-  const otherText = buildCatalogText('other');
-  const parts = [glassText, otherText].filter(t=>t);
-  if(parts.length === 0){ showToast('لا توجد أصناف متوفرة حاليًا'); return; }
-  const combined = parts.join('\n\n————————\n\n');
+  let combined;
+  if(which === 'glass'){
+    combined = buildCatalogText('glass') || '';
+  }else if(which === 'other'){
+    combined = buildCatalogText('other') || '';
+  }else{
+    const glassText = buildCatalogText('glass');
+    const otherText = buildCatalogText('other');
+    combined = [glassText, otherText].filter(t=>t).join('\n\n————————\n\n');
+  }
+  if(!combined){ showToast('لا توجد أصناف متوفرة بهذي الفئة'); return; }
 
   const text = encodeURIComponent(combined);
-  const phone = c && c.phone ? c.phone.replace(/[^0-9]/g,'') : '';
+  const phone = c && c.phone ? formatPhoneForWhatsApp(c.phone) : '';
   const url = phone ? `https://wa.me/${phone}?text=${text}` : `https://wa.me/?text=${text}`;
   window.open(url, '_blank');
+  closeOverlay();
 }
 
 function selectPosCustomer(id){
@@ -2666,7 +2706,7 @@ function shareInvoiceWhatsApp(inv){
   lines.push('شكراً لتعاملكم معنا');
 
   const text = encodeURIComponent(lines.join('\n'));
-  const phone = cust && cust.phone ? cust.phone.replace(/[^0-9+]/g,'') : '';
+  const phone = cust && cust.phone ? formatPhoneForWhatsApp(cust.phone) : '';
   const url = phone ? `https://wa.me/${phone}?text=${text}` : `https://wa.me/?text=${text}`;
   window.open(url, '_blank');
 }
@@ -2991,6 +3031,34 @@ function renderTopProducts(){
 function customerBalance(id){
   const c = customers.find(x=>x.id===id);
   return c ? c.balance : 0;
+}
+
+function exportCustomerContacts(){
+  const withPhone = customers.filter(c=>c.phone && c.phone.trim());
+  if(withPhone.length === 0){ showToast('لا يوجد عملاء برقم هاتف مسجّل'); return; }
+
+  const cards = withPhone.map(c=>{
+    const intlPhone = '+' + formatPhoneForWhatsApp(c.phone);
+    return [
+      'BEGIN:VCARD',
+      'VERSION:3.0',
+      `FN:${c.name}`,
+      `TEL;TYPE=CELL:${intlPhone}`,
+      'END:VCARD'
+    ].join('\n');
+  });
+  const vcfContent = cards.join('\n');
+
+  const blob = new Blob([vcfContent], { type: 'text/vcard' });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = 'عملاء-' + (settings.shopName || 'المتجر') + '.vcf';
+  document.body.appendChild(a);
+  a.click();
+  document.body.removeChild(a);
+  URL.revokeObjectURL(url);
+  showToast(`تم تصدير ${withPhone.length} جهة اتصال — افتح الملف من جوالك لاستيرادها`);
 }
 
 function renderCustomers(){
@@ -4058,26 +4126,47 @@ function buildCatalogText(type){
   lines.push(`*${settings.shopName || 'متجري'}*`);
   lines.push(header);
   lines.push('');
-  const seenGlassNames = new Set();
-  items.forEach(p=>{
-    if(type==='glass'){
+
+  if(type==='glass'){
+    const seenGlassNames = new Set();
+    const brandGroups = {};
+    items.forEach(p=>{
       let grp = p.compatGroupId ? compatGroups.find(g=>g.id===p.compatGroupId) : null;
       if(!grp){
         grp = compatGroups.find(g=>g.models.some(m => matchesModel(p.name, m)));
       }
       const namesToList = grp ? grp.models : [p.name];
+      const brandKey = p.brand || 'أخرى';
       namesToList.forEach(name=>{
         const key = name.trim().toLowerCase();
         if(seenGlassNames.has(key)) return;
         seenGlassNames.add(key);
-        lines.push(`✅ ${name}`);
+        if(!brandGroups[brandKey]) brandGroups[brandKey] = [];
+        brandGroups[brandKey].push(name);
       });
-    }else if(type==='traders'){
-      lines.push(`${p.name} — ${plainNum(p.sellPrice)} ${settings.currency}`);
-    }else{
-      lines.push(`✅ ${p.name}`);
-    }
-  });
+    });
+    const brandNames = Object.keys(brandGroups).sort((a,b)=>{
+      if(a==='أخرى') return 1;
+      if(b==='أخرى') return -1;
+      return a.localeCompare(b);
+    });
+    brandNames.forEach(brand=>{
+      lines.push(`*📱 ${brand}*`);
+      brandGroups[brand]
+        .sort((a,b)=> a.localeCompare(b, undefined, {numeric:true, sensitivity:'base'}))
+        .forEach(name=>{ lines.push(`✅ ${name}`); });
+      lines.push('');
+    });
+    if(lines[lines.length-1] === '') lines.pop();
+  }else{
+    items.forEach(p=>{
+      if(type==='traders'){
+        lines.push(`${p.name} — ${plainNum(p.sellPrice)} ${settings.currency}`);
+      }else{
+        lines.push(`✅ ${p.name}`);
+      }
+    });
+  }
   lines.push('');
   lines.push(type==='traders' ? 'الأسعار قابلة للنقاش حسب الكمية 📩' : 'راسلنا لأي استفسار 📩');
   return lines.join('\n');
@@ -4919,7 +5008,7 @@ function shareDraftOrderWhatsApp(orderId){
   lines.push('جهّزها لو سمحت 🙏');
 
   const text = encodeURIComponent(lines.join('\n'));
-  const phone = (settings.friendPhone || '').replace(/[^0-9]/g,'');
+  const phone = formatPhoneForWhatsApp(settings.friendPhone);
   const url = phone ? `https://wa.me/${phone}?text=${text}` : `https://wa.me/?text=${text}`;
   window.open(url, '_blank');
 }
