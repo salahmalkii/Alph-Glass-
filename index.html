@@ -1175,7 +1175,8 @@ async function enableFingerprint(){
     showToast('تم تفعيل بصمة الإصبع بنجاح');
     openSettings();
   }catch(e){
-    showToast('تعذر تفعيل بصمة الإصبع');
+    const errName = e && e.name ? e.name : 'خطأ غير معروف';
+    showToast(`تعذر التفعيل: ${errName}${e && e.message ? ' — ' + e.message : ''}`);
   }
 }
 
