@@ -2218,7 +2218,7 @@ function buildCheckoutSheet(){
           <option value="">— اختر عميلاً —</option>
           ${customers.map(c=>`<option value="${c.id}" ${checkoutCustomerId===c.id?'selected':''}>${escapeHtml(c.name)}${c.balance>0 ? ' (عليه ' + plainNum(c.balance) + ')' : ''}</option>`).join('')}
         </select>
-        ${customers.length===0 ? `<div class="row-sub" style="margin-top:6px;">لا يوجد عملاء بعد — <span style="color:var(--accent-b);cursor:pointer;" onclick="closeOverlay();switchScreen('customers');fabAction();">أضف عميلاً أولاً</span></div>` : ''}
+        ${customers.length===0 ? `<div class="row-sub" style="margin-top:6px;">لا يوجد عملاء بعد — <span style="color:var(--accent-b);cursor:pointer;" onclick="switchScreen('customers');fabAction();">أضف عميلاً أولاً</span></div>` : ''}
       `}
     </div>
     <div class="field" style="margin-bottom:6px;">
@@ -2405,7 +2405,6 @@ async function confirmSale(){
   editingDraftOrderId = null;
   await Promise.all(saveOps);
   renderAll();
-  closeOverlay();
   playSaleAlert();
   showInvoicePreview(invoice, false);
 }
@@ -3962,7 +3961,7 @@ function renderGlobalSearchResults(){
   if(matchedProducts.length > 0){
     html += `<div class="section-title"><span>📦 أصناف</span></div><div class="ledger" style="margin-bottom:14px;">`;
     html += matchedProducts.map(p=>`
-      <div class="row" style="cursor:pointer;" onclick="closeOverlay();switchScreen('inventory');setTimeout(()=>openProductSheet('${p.id}'),50);">
+      <div class="row" style="cursor:pointer;" onclick="switchScreen('inventory');openProductSheet('${p.id}');">
         <div class="row-main">
           <div class="row-name">${escapeHtml(p.name)}</div>
           <div class="row-sub">متوفر: ${p.qty} — ${plainNum(p.sellPrice)} ${settings.currency}</div>
@@ -3973,7 +3972,7 @@ function renderGlobalSearchResults(){
   if(matchedCustomers.length > 0){
     html += `<div class="section-title"><span>👤 عملاء</span></div><div class="ledger" style="margin-bottom:14px;">`;
     html += matchedCustomers.map(c=>`
-      <div class="row" style="cursor:pointer;" onclick="closeOverlay();switchScreen('customers');setTimeout(()=>openCustomerDetail('${c.id}'),50);">
+      <div class="row" style="cursor:pointer;" onclick="switchScreen('customers');openCustomerDetail('${c.id}');">
         <div class="row-main">
           <div class="row-name">${escapeHtml(c.name)}</div>
           ${c.balance>0 ? `<div class="row-sub">عليه دين: ${plainNum(c.balance)} ${settings.currency}</div>` : ''}
@@ -3984,7 +3983,7 @@ function renderGlobalSearchResults(){
   if(matchedInvoices.length > 0){
     html += `<div class="section-title"><span>📜 فواتير</span></div><div class="ledger">`;
     html += matchedInvoices.map(inv=>`
-      <div class="row" style="cursor:pointer;" onclick='closeOverlay();showInvoicePreview(${JSON.stringify(inv).replace(/'/g,"&#39;")}, false);'>
+      <div class="row" style="cursor:pointer;" onclick='showInvoicePreview(${JSON.stringify(inv).replace(/'/g,"&#39;")}, false);'>
         <div class="row-main">
           <div class="row-name">فاتورة #${inv.number}</div>
           <div class="row-sub">${plainNum(inv.total)} ${settings.currency}</div>
@@ -4506,7 +4505,7 @@ function openOverdueDebts(){
     ${withDebt.length === 0 ? `<div class="empty"><span class="big">✅</span>لا يوجد عملاء عليهم ديون حاليًا</div>` : `
     <div class="ledger">
       ${withDebt.map(({c, days})=>`
-        <div class="row" style="cursor:pointer;" onclick="closeOverlay();switchScreen('customers');setTimeout(()=>openCustomerDetail('${c.id}'),50);">
+        <div class="row" style="cursor:pointer;" onclick="switchScreen('customers');openCustomerDetail('${c.id}');">
           <div class="row-main">
             <div class="row-name">${escapeHtml(c.name)}</div>
             <div class="row-sub">${days > 0 ? 'منذ ' + days + ' يوم' : 'اليوم'}</div>
