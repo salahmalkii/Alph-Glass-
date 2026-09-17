@@ -2170,7 +2170,11 @@ function buildCheckoutSheet(){
     <div class="row-sub" style="margin-bottom:14px;">المتبقي كدين: <span class="mono" id="chkRemaining" style="color:var(--alert);font-weight:700;">0</span></div>
     ` : ''}
     <div class="stat-grid">
-      <div class="stat-card" style="flex:1 1 100%;">
+      <div class="stat-card">
+        <div class="v mono">${ids.reduce((a,id)=>a+cart[id],0)}</div>
+        <div class="l">إجمالي القطع</div>
+      </div>
+      <div class="stat-card">
         <div class="v mono" id="chkTotal">0</div>
         <div class="l">الإجمالي</div>
       </div>
@@ -2368,12 +2372,12 @@ function renderInvoices(){
     return `
     <div class="invoice-card" onclick='showInvoicePreview(${JSON.stringify(inv).replace(/'/g,"&#39;")}, false)'>
       <div class="top-row">
-        <div class="num">فاتورة #${inv.number}</div>
+        <div class="num">فاتورة #${inv.number}${cust ? ` — ${escapeHtml(cust.name)}` : ''}</div>
         <div class="amt mono">${plainNum(inv.total)}</div>
       </div>
       <div class="date">${dateStr}</div>
       <div class="items-count">${inv.items.length} صنف · ${totalPieces} قطعة${settings.hideProfit ? '' : ' · ربح ' + plainNum(inv.profit) + ' ' + settings.currency}</div>
-      ${cust ? `<span class="cat-badge ${hasDebt ? '' : 'other'}" style="${hasDebt ? 'background:var(--alert-bg);color:var(--alert);' : ''}margin-top:6px;">${hasDebt ? (isPartial ? 'دفع جزئي' : 'دين') + ' — ' : ''}${escapeHtml(cust.name)}</span>` : ''}
+      ${hasDebt ? `<span class="cat-badge" style="background:var(--alert-bg);color:var(--alert);margin-top:6px;">${isPartial ? 'دفع جزئي' : 'دين'}</span>` : ''}
     </div>`;
   }).join('');
 }
@@ -2467,6 +2471,7 @@ async function shareInvoiceAsImage(inv){
   let height = 90;
   height += 66; // logo
   if(settings.shopPhone) height += 18;
+  if(cust) height += 16;
   height += 20;
   height += inv.items.length * lineHeight;
   height += 20; // total pieces line
@@ -2523,6 +2528,10 @@ async function shareInvoiceAsImage(inv){
   if(settings.shopPhone){ ctx.fillText(settings.shopPhone, width - padding, y); y += 18; }
   ctx.fillText(`فاتورة #${inv.number} — ${dateStr}`, width - padding, y);
   y += 16;
+  if(cust){
+    ctx.fillText(`العميل: ${cust.name}`, width - padding, y);
+    y += 16;
+  }
 
   drawDashedLine(ctx, padding, y, width - padding, y);
   y += 24;
@@ -2631,6 +2640,7 @@ function shareInvoiceWhatsApp(inv){
   lines.push(`*${settings.shopName || 'متجري'}*`);
   if(settings.shopPhone) lines.push(settings.shopPhone);
   lines.push(`فاتورة #${inv.number}`);
+  if(cust) lines.push(`العميل: ${cust.name}`);
   lines.push('');
   inv.items.forEach(it=>{
     lines.push(`${it.name} ×${it.qty} — ${plainNum(it.qty*it.sellPrice)}`);
