@@ -547,9 +547,9 @@
 <div id="appLockScreen" class="no-print" style="display:none;position:fixed;inset:0;z-index:200;background:var(--bg);flex-direction:column;align-items:center;justify-content:center;padding:24px;">
   <div class="brand-icon" style="width:64px;height:64px;border-radius:18px;margin-bottom:18px;" id="lockScreenIcon"></div>
   <h2 style="margin-bottom:6px;">Alpha Glass</h2>
-  <div class="row-sub" style="margin-bottom:22px;">أدخل كلمة المرور للدخول</div>
+  <div class="row-sub" style="margin-bottom:22px;">أدخل رمز الحماية للدخول</div>
   <div style="width:100%;max-width:280px;">
-    <input type="password" id="lockPasswordInput" placeholder="كلمة المرور" onkeydown="if(event.key==='Enter')attemptUnlock()" style="width:100%;padding:13px 14px;border-radius:12px;border:1.5px solid var(--border-strong);background:var(--surface-soft);color:var(--text);font-family:'Cairo',sans-serif;font-size:15px;text-align:center;margin-bottom:12px;">
+    <input type="password" inputmode="numeric" maxlength="6" id="lockPasswordInput" placeholder="رمز الحماية" onkeydown="if(event.key==='Enter')attemptUnlock()" style="width:100%;padding:13px 14px;border-radius:12px;border:1.5px solid var(--border-strong);background:var(--surface-soft);color:var(--text);font-family:'Cairo',sans-serif;font-size:22px;letter-spacing:8px;text-align:center;margin-bottom:12px;">
     <button class="btn btn-brass btn-block" onclick="attemptUnlock()">دخول</button>
     <button class="btn btn-outline btn-block" id="fingerprintUnlockBtn" onclick="attemptFingerprintUnlock()" style="display:none;margin-top:10px;">👆 فتح ببصمة الإصبع</button>
     <div id="lockError" style="color:var(--alert);font-size:12.5px;text-align:center;margin-top:10px;min-height:16px;"></div>
@@ -1013,10 +1013,12 @@ async function loadAll(){
 
   if(settings.appPassword && sessionStorage.getItem(STORAGE_PREFIX + 'unlocked') !== 'true'){
     document.getElementById('appLockScreen').style.display = 'flex';
-    setTimeout(()=>document.getElementById('lockPasswordInput')?.focus(), 100);
     if(settings.fingerprintCredentialId){
       const fpBtn = document.getElementById('fingerprintUnlockBtn');
       if(fpBtn) fpBtn.style.display = 'block';
+      setTimeout(()=>attemptFingerprintUnlock(), 300);
+    }else{
+      setTimeout(()=>document.getElementById('lockPasswordInput')?.focus(), 100);
     }
   }else{
     recordLogin();
@@ -1065,7 +1067,12 @@ function triggerAutoLock(){
   const fpBtn = document.getElementById('fingerprintUnlockBtn');
   if(fpBtn) fpBtn.style.display = settings.fingerprintCredentialId ? 'block' : 'none';
   const input = document.getElementById('lockPasswordInput');
-  if(input){ input.value=''; setTimeout(()=>input.focus(), 100); }
+  if(input) input.value='';
+  if(settings.fingerprintCredentialId){
+    setTimeout(()=>attemptFingerprintUnlock(), 300);
+  }else if(input){
+    setTimeout(()=>input.focus(), 100);
+  }
 }
 
 function attemptUnlock(){
@@ -1085,7 +1092,7 @@ function attemptUnlock(){
     document.getElementById('appLockScreen').style.display = 'none';
     enterLimitedMode();
   }else{
-    errorEl.textContent = 'كلمة المرور غير صحيحة';
+    errorEl.textContent = 'رمز الحماية غير صحيح';
     input.value = '';
     input.focus();
   }
@@ -1145,7 +1152,7 @@ async function attemptFingerprintUnlock(){
     setupAutoLock();
   }catch(e){
     const errName = e && e.name ? e.name : 'خطأ غير معروف';
-    if(errorEl) errorEl.textContent = `تعذر التحقق من البصمة (${errName}) — جرّب كلمة المرور`;
+    if(errorEl) errorEl.textContent = `تعذر التحقق من البصمة (${errName}) — جرّب رمز الحماية`;
   }
 }
 
@@ -5109,16 +5116,16 @@ function openSettings(){
 
     <div class="section-title"><span>حماية التطبيق</span></div>
     <div class="field">
-      <label>كلمة مرور فتح التطبيق ${settings.appPassword ? '(مفعّلة حاليًا)' : '(غير مفعّلة)'}</label>
-      <input type="password" id="s-app-password" placeholder="${settings.appPassword ? '•••••• (اتركه فارغًا للإبقاء عليها)' : 'اكتب كلمة مرور للتفعيل'}">
+      <label>رمز حماية فتح التطبيق (4-6 أرقام) ${settings.appPassword ? '(مفعّل حاليًا)' : '(غير مفعّل)'}</label>
+      <input type="password" inputmode="numeric" maxlength="6" id="s-app-password" placeholder="${settings.appPassword ? '•••••• (اتركه فارغًا للإبقاء عليه)' : 'مثال: 1234'}" style="letter-spacing:6px;text-align:center;font-size:18px;">
     </div>
-    ${settings.appPassword ? `<div class="row-sub" style="margin-bottom:14px;color:var(--accent-b);cursor:pointer;" onclick="document.getElementById('s-app-password').value='__CLEAR__';document.getElementById('s-app-password').type='text';document.getElementById('s-app-password').placeholder='سيتم إلغاء كلمة المرور عند الحفظ';document.getElementById('s-app-password').readOnly=true;">إلغاء كلمة المرور</div>` : ''}
+    ${settings.appPassword ? `<div class="row-sub" style="margin-bottom:14px;color:var(--accent-b);cursor:pointer;" onclick="document.getElementById('s-app-password').value='__CLEAR__';document.getElementById('s-app-password').type='text';document.getElementById('s-app-password').placeholder='سيتم إلغاء رمز الحماية عند الحفظ';document.getElementById('s-app-password').readOnly=true;">إلغاء رمز الحماية</div>` : ''}
 
     ${settings.appPassword ? `
     <div class="field" style="display:flex;align-items:center;justify-content:space-between;background:var(--surface);border:1.5px solid var(--border);border-radius:10px;padding:12px 14px;margin-bottom:14px;">
       <div>
         <div style="font-weight:700;font-size:14px;">👆 فتح ببصمة الإصبع</div>
-        <div style="font-size:11.5px;color:var(--muted);margin-top:2px;">${settings.fingerprintCredentialId ? 'مفعّلة على هذا الجهاز' : 'أسرع من كتابة كلمة المرور كل مرة'}</div>
+        <div style="font-size:11.5px;color:var(--muted);margin-top:2px;">${settings.fingerprintCredentialId ? 'مفعّلة على هذا الجهاز' : 'أسرع من كتابة الرمز كل مرة'}</div>
       </div>
       ${settings.fingerprintCredentialId
         ? `<button class="btn btn-ghost-alert" onclick="disableFingerprint()">إلغاء</button>`
@@ -5273,7 +5280,8 @@ async function saveSettingsForm(){
     settings.limitedPassword = '';
     sessionStorage.removeItem(STORAGE_PREFIX + 'unlocked');
   }else if(pwVal.trim() !== ''){
-    settings.appPassword = pwVal;
+    if(!/^\d{4,6}$/.test(pwVal.trim())){ showToast('رمز الحماية يجب أن يكون 4 إلى 6 أرقام'); return; }
+    settings.appPassword = pwVal.trim();
     sessionStorage.setItem(STORAGE_PREFIX + 'unlocked', 'true');
   }
   // empty field with existing password already set: keep it unchanged
