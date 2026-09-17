@@ -3936,10 +3936,20 @@ function buildCatalogText(type){
   lines.push(`*${settings.shopName || 'متجري'}*`);
   lines.push(header);
   lines.push('');
+  const seenGlassNames = new Set();
   items.forEach(p=>{
     if(type==='glass'){
-      const grp = p.compatGroupId ? compatGroups.find(g=>g.id===p.compatGroupId) : null;
-      lines.push(`✅ ${p.name}${grp ? ' (يغطي: ' + grp.models.join('، ') + ')' : ''}`);
+      let grp = p.compatGroupId ? compatGroups.find(g=>g.id===p.compatGroupId) : null;
+      if(!grp){
+        grp = compatGroups.find(g=>g.models.some(m => matchesModel(p.name, m)));
+      }
+      const namesToList = grp ? grp.models : [p.name];
+      namesToList.forEach(name=>{
+        const key = name.trim().toLowerCase();
+        if(seenGlassNames.has(key)) return;
+        seenGlassNames.add(key);
+        lines.push(`✅ ${name}`);
+      });
     }else if(type==='traders'){
       lines.push(`${p.name} — ${plainNum(p.sellPrice)} ${settings.currency}`);
     }else{
@@ -4532,7 +4542,7 @@ function renderOrdersScreen(){
         return `
         <div class="row" ${limited ? '' : `style="cursor:pointer;" onclick="openDraftOrderDetail('${o.id}')"`}>
           <div class="row-main">
-            <div class="row-name">${c ? escapeHtml(c.name) : 'عميل محذوف'}</div>
+            <div class="row-name">${c ? escapeHtml(c.name) : 'عميل محذوف'}${o.status==='ready' ? ' <span class="cat-badge" style="background:var(--profit-bg);color:var(--profit);">✅ جاهزة</span>' : ''}</div>
             <div class="row-sub">${o.items.map(it=>it.name + ' ×' + it.qty).join('، ')}</div>
             <div class="row-sub" style="margin-top:2px;">${dateStr}</div>
           </div>
@@ -4553,6 +4563,7 @@ function openDraftOrderDetail(orderId){
   if(!order) return;
   draftOrderDetailEditMode = false;
   const c = customers.find(x=>x.id===order.customerId);
+  const isReady = order.status === 'ready';
   const sheet = document.getElementById('sheetContent');
   sheet.innerHTML = `
     <div class="sheet-head">
@@ -4562,7 +4573,7 @@ function openDraftOrderDetail(orderId){
         <button class="icon-btn" onclick="closeOverlay()">✕</button>
       </div>
     </div>
-    <div class="row-sub" style="margin-bottom:12px;">${c ? escapeHtml(c.name) : 'عميل محذوف'}</div>
+    <div class="row-sub" style="margin-bottom:12px;">${c ? escapeHtml(c.name) : 'عميل محذوف'}${isReady ? ' — <span style="color:var(--profit);">✅ جاهزة</span>' : ''}</div>
     <div class="ledger" id="doItemsList" style="margin-bottom:14px;"></div>
     <div id="doAddSection" style="display:none;">
       <div class="search-bar" style="margin-bottom:8px;">
@@ -4578,7 +4589,9 @@ function openDraftOrderDetail(orderId){
       <button class="btn btn-ghost-alert btn-block" onclick="deleteDraftOrder('${orderId}')">🗑 حذف الطلبية</button>
     </div>
     <div class="sheet-actions">
-      <button class="btn btn-brass btn-block" onclick="loadDraftOrderToCart('${orderId}')">🚚 بدء التجهيز الآن</button>
+      ${isReady
+        ? `<button class="btn btn-brass btn-block" onclick="loadDraftOrderToCart('${orderId}')">🧾 إصدار الفاتورة</button>`
+        : `<button class="btn btn-brass btn-block" onclick="markOrderReady('${orderId}')">✅ الطلبية جاهزة</button>`}
     </div>
   `;
   renderDraftOrderItemsList(orderId);
@@ -4599,9 +4612,13 @@ function printOrderLabels(orderId){
   if(!order || order.items.length === 0){ showToast('لا توجد أصناف'); return; }
   const labels = [];
   order.items.forEach(it=>{
+    const realProduct = it.productId ? products.find(x=>x.id===it.productId) : null;
+    const isOverride = realProduct && realProduct.name !== it.name;
+    if(!isOverride) return;
     const labelCount = Math.max(1, Math.ceil(it.qty / LABEL_BATCH_SIZE));
     for(let i=0;i<labelCount;i++) labels.push(it.name);
   });
+  if(labels.length === 0){ showToast('لا توجد أصناف بديلة تحتاج ملصقات'); return; }
   const grid = document.getElementById('labelGridContent');
   grid.innerHTML = labels.map(n=>`<div class="label-box">${escapeHtml(n)}</div>`).join('');
   window.print();
@@ -4627,19 +4644,26 @@ function renderDraftOrderItemsList(orderId){
   }
 
   if(!draftOrderDetailEditMode){
-    list.innerHTML = order.items.map((it, idx)=>`
+    list.innerHTML = order.items.map((it, idx)=>{
+      const realProduct = it.productId ? products.find(x=>x.id===it.productId) : null;
+      const isOverride = realProduct && realProduct.name !== it.name;
+      return `
       <div class="row">
         <div class="row-main">
           <div class="row-name">${escapeHtml(it.name)}</div>
           <div class="row-sub mono">${it.qty} قطعة × ${plainNum(it.sellPrice)} ${settings.currency} = ${plainNum(it.qty * it.sellPrice)}</div>
+          ${isOverride ? `<div class="row-sub" style="color:var(--accent-b);">🧩 الصنف الفعلي: ${escapeHtml(realProduct.name)}</div>` : ''}
         </div>
-        <button class="icon-btn" onclick="printSingleOrderItemLabel('${orderId}', ${idx})">🏷</button>
+        ${isOverride ? `<button class="icon-btn" onclick="printSingleOrderItemLabel('${orderId}', ${idx})">🏷</button>` : ''}
       </div>
-    `).join('');
+    `;}).join('');
     return;
   }
 
-  list.innerHTML = order.items.map((it, idx)=>`
+  list.innerHTML = order.items.map((it, idx)=>{
+    const realProduct = it.productId ? products.find(x=>x.id===it.productId) : null;
+    const isOverride = realProduct && realProduct.name !== it.name;
+    return `
     <div class="row">
       <div class="row-main">
         <div class="row-name">${escapeHtml(it.name)}</div>
@@ -4656,10 +4680,10 @@ function renderDraftOrderItemsList(orderId){
           style="width:100%;padding:6px 4px;border-radius:8px;border:1.5px solid var(--border-strong);background:var(--surface-soft);color:var(--text);font-size:13px;text-align:center;"
           onchange="updateDraftOrderItem('${orderId}', ${idx}, 'sellPrice', this.value)">
       </div>
-      <button class="icon-btn" onclick="printSingleOrderItemLabel('${orderId}', ${idx})">🏷</button>
+      ${isOverride ? `<button class="icon-btn" onclick="printSingleOrderItemLabel('${orderId}', ${idx})">🏷</button>` : ''}
       <button class="icon-btn" onclick="removeDraftOrderItem('${orderId}', ${idx})">🗑</button>
     </div>
-  `).join('');
+  `;}).join('');
 }
 
 async function updateDraftOrderItem(orderId, idx, field, value){
@@ -4742,8 +4766,20 @@ function loadDraftOrderToCart(orderId){
   posCustomerId = order.customerId;
   orderDraftMode = false;
   editingDraftOrderId = order.id;
+  closeOverlay();
   switchScreen('sell');
   if(skipped > 0) showToast('بعض أصناف الطلبية لم تعد متوفرة بالمخزون');
+}
+
+async function markOrderReady(orderId){
+  const order = draftOrders.find(x=>x.id===orderId);
+  if(!order) return;
+  order.status = 'ready';
+  await saveDraftOrders();
+  renderOrdersScreen();
+  updateOrdersNavBadge();
+  openDraftOrderDetail(orderId);
+  showToast('الطلبية صارت جاهزة');
 }
 
 function shareDraftOrderWhatsApp(orderId){
