@@ -709,6 +709,10 @@
         <div class="home-tile-icon">🏷</div>
         <div class="home-tile-label">طباعة ملصق</div>
       </div>
+      <div class="home-tile" onclick="openDailySoldReport()">
+        <div class="home-tile-icon">📦</div>
+        <div class="home-tile-label">المبيعات حسب الصنف</div>
+      </div>
       <div class="home-tile" onclick="openGlobalSearch()">
         <div class="home-tile-icon">🔍</div>
         <div class="home-tile-label">بحث شامل</div>
@@ -836,8 +840,8 @@
 </div>
 
 <nav class="no-print">
-  <button class="nav-btn" data-screen="sell" onclick="switchScreen('sell')">
-    <span class="ic">🧾</span>بيع
+  <button class="nav-btn" data-screen="sell" onclick="startDraftOrderFlow()">
+    <span class="ic">📝</span>تحضير الطلبيات
   </button>
   <button class="nav-btn" data-screen="orders" onclick="switchScreen('orders')" style="position:relative;">
     <span class="ic" style="position:relative;">📋<span id="ordersNavBadge" style="display:none;position:absolute;top:-4px;left:-10px;background:var(--alert);color:#fff;border-radius:999px;font-size:9px;min-width:15px;height:15px;line-height:15px;text-align:center;padding:0 3px;"></span></span>الطلبيات
@@ -1635,6 +1639,15 @@ function startOrderForCustomer(customerId){
   switchScreen('sell');
 }
 
+function startDraftOrderFlow(){
+  posCustomerId = null;
+  orderDraftMode = true;
+  editingDraftOrderId = null;
+  cart = {};
+  cartDisplayName = {};
+  switchScreen('sell');
+}
+
 function startDraftOrderForCustomer(customerId){
   posCustomerId = customerId;
   orderDraftMode = true;
@@ -1845,12 +1858,13 @@ function quickAddToCart(productId){
   renderPos();
 }
 
-function quickAddAndClearSearch(productId){
+function quickAddAndClearSearch(productId, matchedTerm){
   const p = products.find(x=>x.id===productId);
   if(!p || p.qty <= 0){ showToast('غير متوفر بالمخزون'); return; }
   const cur = cart[productId] || 0;
   if(cur >= p.qty){ showToast('الكمية غير متوفرة'); return; }
   cart[productId] = Math.min(cur + CART_STEP, p.qty);
+  if(matchedTerm && !cartDisplayName[productId]) cartDisplayName[productId] = matchedTerm;
   const searchInput = document.getElementById('posSearch');
   if(searchInput) searchInput.value = '';
   renderPos();
@@ -1864,7 +1878,33 @@ function renderPos(){
   renderPosDraftSelectedList();
   const q = (document.getElementById('posSearch')?.value || '').trim().toLowerCase();
   const list = document.getElementById('posList');
-  const filtered = products.filter(p => p.name.toLowerCase().includes(q) && (posFilter==='all' || categoryLabel(p)===posFilter));
+  const byFilter = products.filter(p => posFilter==='all' || categoryLabel(p)===posFilter);
+  let filtered = byFilter.filter(p => p.name.toLowerCase().includes(q));
+  let posCompatMatchInfo = {};
+  if(q){
+    const nameMatchIds = new Set(filtered.map(p=>p.id));
+    const matchingGroups = compatGroups.filter(g=>g.models.some(m=>m.toLowerCase().includes(q)));
+    const groupMatches = byFilter.filter(p=>{
+      if(nameMatchIds.has(p.id)) return false;
+      let matchedModel = null;
+      if(p.compatGroupId){
+        const grp = compatGroups.find(g=>g.id===p.compatGroupId);
+        if(grp) matchedModel = grp.models.find(m=>m.toLowerCase().includes(q));
+      }
+      if(!matchedModel){
+        for(const grp of matchingGroups){
+          const nameHasOtherModel = grp.models.some(m => p.name.toLowerCase().includes(m.toLowerCase()));
+          if(nameHasOtherModel){
+            matchedModel = grp.models.find(m=>m.toLowerCase().includes(q));
+            if(matchedModel) break;
+          }
+        }
+      }
+      if(matchedModel){ posCompatMatchInfo[p.id] = matchedModel; return true; }
+      return false;
+    });
+    filtered = [...filtered, ...groupMatches];
+  }
 
   const posChipsEl = document.getElementById('posChips');
   if(posChipsEl){
@@ -1895,11 +1935,14 @@ function renderPos(){
     const outOfStock = p.qty <= 0;
     const grp = p.compatGroupId ? compatGroups.find(g=>g.id===p.compatGroupId) : null;
     const displayName = cartDisplayName[p.id];
+    const matchedTerm = posCompatMatchInfo[p.id];
+    const matchedTermArg = matchedTerm ? `'${escapeHtml(matchedTerm).replace(/'/g,"\\'")}'` : 'null';
     return `
     <div class="pos-item">
-      <div class="row-main" ${orderDraftMode ? `style="cursor:pointer;" onclick="quickAddAndClearSearch('${p.id}')"` : ''}>
+      <div class="row-main" ${orderDraftMode ? `style="cursor:pointer;" onclick="quickAddAndClearSearch('${p.id}', ${matchedTermArg})"` : ''}>
         <div class="row-name">${escapeHtml(p.name)}</div>
         <div class="row-sub mono">${plainNum(p.sellPrice)} ${settings.currency} · متوفر ${p.qty}</div>
+        ${matchedTerm ? `<div class="row-sub" style="color:var(--accent-b);margin-top:2px;">🧩 متوافق مع "${escapeHtml(matchedTerm)}" اللي بحثت عنه</div>` : ''}
         ${inCart > 0 && grp ? `<div class="row-sub" style="color:var(--accent-b);cursor:pointer;margin-top:2px;" onclick="event.stopPropagation();openDisplayNamePicker('${p.id}')">🏷 ${displayName ? 'يُباع باسم: ' + escapeHtml(displayName) : 'بيعه باسم موديل آخر متوافق؟'}</div>` : ''}
       </div>
       <div class="stepper">
@@ -2254,6 +2297,7 @@ function renderInvoices(){
     const cust = inv.customerId ? customers.find(c=>c.id===inv.customerId) : null;
     const hasDebt = cust && inv.remaining > 0;
     const isPartial = hasDebt && inv.paidNow > 0;
+    const totalPieces = inv.items.reduce((a,it)=>a+it.qty, 0);
     return `
     <div class="invoice-card" onclick='showInvoicePreview(${JSON.stringify(inv).replace(/'/g,"&#39;")}, false)'>
       <div class="top-row">
@@ -2261,8 +2305,8 @@ function renderInvoices(){
         <div class="amt mono">${plainNum(inv.total)}</div>
       </div>
       <div class="date">${dateStr}</div>
-      <div class="items-count">${inv.items.length} صنف${settings.hideProfit ? '' : ' · ربح ' + plainNum(inv.profit) + ' ' + settings.currency}</div>
-      ${hasDebt ? `<span class="cat-badge" style="background:var(--alert-bg);color:var(--alert);margin-top:6px;">${isPartial ? 'دفع جزئي' : 'دين'} — ${escapeHtml(cust.name)}</span>` : ''}
+      <div class="items-count">${inv.items.length} صنف · ${totalPieces} قطعة${settings.hideProfit ? '' : ' · ربح ' + plainNum(inv.profit) + ' ' + settings.currency}</div>
+      ${cust ? `<span class="cat-badge ${hasDebt ? '' : 'other'}" style="${hasDebt ? 'background:var(--alert-bg);color:var(--alert);' : ''}margin-top:6px;">${hasDebt ? (isPartial ? 'دفع جزئي' : 'دين') + ' — ' : ''}${escapeHtml(cust.name)}</span>` : ''}
     </div>`;
   }).join('');
 }
@@ -2346,6 +2390,7 @@ function shareInvoiceAsImage(inv){
   if(settings.shopPhone) height += 18;
   height += 20;
   height += inv.items.length * lineHeight;
+  height += 20; // total pieces line
   height += 24;
   if(inv.discountAmount > 0) height += 44;
   height += 34;
@@ -2392,6 +2437,13 @@ function shareInvoiceAsImage(inv){
     ctx.fillText(plainNum(it.qty * it.sellPrice), padding, y);
     y += lineHeight;
   });
+
+  const totalPiecesImg = inv.items.reduce((a,it)=>a+it.qty, 0);
+  ctx.font = "12px 'Segoe UI', Tahoma, Arial, sans-serif";
+  ctx.fillStyle = '#777777';
+  ctx.textAlign = 'right';
+  ctx.fillText(`إجمالي القطع: ${totalPiecesImg}`, width - padding, y);
+  y += 20;
 
   drawDashedLine(ctx, padding, y, width - padding, y);
   y += 22;
@@ -2465,6 +2517,8 @@ function shareInvoiceWhatsApp(inv){
   inv.items.forEach(it=>{
     lines.push(`${it.name} ×${it.qty} — ${plainNum(it.qty*it.sellPrice)}`);
   });
+  const totalPiecesShare = inv.items.reduce((a,it)=>a+it.qty, 0);
+  lines.push(`إجمالي القطع: ${totalPiecesShare}`);
   if(inv.discountAmount > 0){
     lines.push('');
     lines.push(`المجموع: ${plainNum(inv.rawTotal)}`);
@@ -3398,6 +3452,49 @@ function sharePurchaseListWhatsApp(){
 
 /* ================= Inventory Change Log ================= */
 /* ================= Login Log ================= */
+/* ================= Daily Sold Report ================= */
+let soldReportPeriod = 'day';
+
+function openDailySoldReport(period){
+  soldReportPeriod = period || soldReportPeriod || 'day';
+  const sheet = document.getElementById('sheetContent');
+  const { curStart, curEnd, curLabel } = getPeriodRanges(soldReportPeriod);
+  const inv = invoices.filter(i=>{ const d = new Date(i.date); return d>=curStart && d<curEnd; });
+
+  const soldByName = {};
+  inv.forEach(i=>{
+    i.items.forEach(it=>{
+      soldByName[it.name] = (soldByName[it.name] || 0) + it.qty;
+    });
+  });
+  const entries = Object.entries(soldByName).sort((a,b)=> b[1]-a[1]);
+  const totalPieces = entries.reduce((a,[,q])=>a+q, 0);
+
+  sheet.innerHTML = `
+    <div class="sheet-head">
+      <h3>المبيعات حسب الصنف</h3>
+      <button class="icon-btn" onclick="closeOverlay()">✕</button>
+    </div>
+    <div class="chip-row" style="margin-bottom:14px;">
+      <button class="chip ${soldReportPeriod==='day'?'active':''}" onclick="openDailySoldReport('day')">اليوم</button>
+      <button class="chip ${soldReportPeriod==='week'?'active':''}" onclick="openDailySoldReport('week')">الأسبوع</button>
+      <button class="chip ${soldReportPeriod==='month'?'active':''}" onclick="openDailySoldReport('month')">الشهر</button>
+    </div>
+    <div class="row-sub" style="margin-bottom:14px;">${curLabel} — إجمالي ${totalPieces} قطعة من ${entries.length} صنف</div>
+    ${entries.length === 0 ? `<div class="empty"><span class="big">📦</span>لا توجد مبيعات بهذي الفترة</div>` : `
+    <div class="ledger">
+      ${entries.map(([name, qty])=>`
+        <div class="row">
+          <div class="row-main"><div class="row-name">${escapeHtml(name)}</div></div>
+          <div class="qty-pill">${qty} قطعة</div>
+        </div>
+      `).join('')}
+    </div>
+    `}
+  `;
+  openOverlay();
+}
+
 function openLoginLog(){
   const sheet = document.getElementById('sheetContent');
   const sorted = [...loginLog].slice(0,100);
@@ -3877,6 +3974,8 @@ function printProductLabels(productId){
   window.print();
 }
 
+const LABEL_BATCH_SIZE = 10;
+
 function printCartLabels(){
   const ids = Object.keys(cart);
   if(ids.length === 0){ showToast('السلة فاضية'); return; }
@@ -3884,7 +3983,8 @@ function printCartLabels(){
   ids.forEach(id=>{
     const name = cartDisplayName[id] || (products.find(p=>p.id===id)||{}).name || '';
     const qty = cart[id];
-    for(let i=0;i<qty;i++) labels.push(name);
+    const labelCount = Math.max(1, Math.ceil(qty / LABEL_BATCH_SIZE));
+    for(let i=0;i<labelCount;i++) labels.push(name);
   });
   const grid = document.getElementById('labelGridContent');
   grid.innerHTML = labels.map(n=>`<div class="label-box">${escapeHtml(n)}</div>`).join('');
@@ -4356,25 +4456,36 @@ function renderOrdersScreen(){
   `;
 }
 
+let draftOrderDetailEditMode = false;
+
 function openDraftOrderDetail(orderId){
   const order = draftOrders.find(x=>x.id===orderId);
   if(!order) return;
+  draftOrderDetailEditMode = false;
   const c = customers.find(x=>x.id===order.customerId);
   const sheet = document.getElementById('sheetContent');
   sheet.innerHTML = `
     <div class="sheet-head">
       <h3>تفاصيل الطلبية</h3>
-      <button class="icon-btn" onclick="closeOverlay()">✕</button>
+      <div style="display:flex;gap:8px;">
+        <button class="icon-btn" onclick="toggleDraftOrderEditMode('${orderId}')" id="doEditToggleBtn">✎ تعديل</button>
+        <button class="icon-btn" onclick="closeOverlay()">✕</button>
+      </div>
     </div>
     <div class="row-sub" style="margin-bottom:12px;">${c ? escapeHtml(c.name) : 'عميل محذوف'}</div>
     <div class="ledger" id="doItemsList" style="margin-bottom:14px;"></div>
-    <div class="search-bar" style="margin-bottom:8px;">
-      <input type="text" id="doAddSearch" placeholder="ابحث لإضافة صنف..." oninput="renderDraftOrderAddResults('${orderId}')">
+    <div id="doAddSection" style="display:none;">
+      <div class="search-bar" style="margin-bottom:8px;">
+        <input type="text" id="doAddSearch" placeholder="ابحث لإضافة صنف..." oninput="renderDraftOrderAddResults('${orderId}')">
+      </div>
+      <div id="doAddResults" style="margin-bottom:16px;"></div>
     </div>
-    <div id="doAddResults" style="margin-bottom:16px;"></div>
     <div class="sheet-actions" style="margin-bottom:10px;">
+      <button class="btn btn-outline" onclick="printOrderLabels('${orderId}')">🏷 طباعة كل الملصقات</button>
       <button class="btn btn-outline" onclick="shareDraftOrderWhatsApp('${orderId}')">📤 مشاركة</button>
-      <button class="btn btn-ghost-alert" onclick="deleteDraftOrder('${orderId}')">🗑 حذف الطلبية</button>
+    </div>
+    <div class="sheet-actions" style="margin-bottom:10px;">
+      <button class="btn btn-ghost-alert btn-block" onclick="deleteDraftOrder('${orderId}')">🗑 حذف الطلبية</button>
     </div>
     <div class="sheet-actions">
       <button class="btn btn-brass btn-block" onclick="loadDraftOrderToCart('${orderId}')">🚚 بدء التجهيز الآن</button>
@@ -4382,6 +4493,38 @@ function openDraftOrderDetail(orderId){
   `;
   renderDraftOrderItemsList(orderId);
   openOverlay();
+}
+
+function toggleDraftOrderEditMode(orderId){
+  draftOrderDetailEditMode = !draftOrderDetailEditMode;
+  const btn = document.getElementById('doEditToggleBtn');
+  const addSection = document.getElementById('doAddSection');
+  if(btn) btn.textContent = draftOrderDetailEditMode ? '✓ تم' : '✎ تعديل';
+  if(addSection) addSection.style.display = draftOrderDetailEditMode ? '' : 'none';
+  renderDraftOrderItemsList(orderId);
+}
+
+function printOrderLabels(orderId){
+  const order = draftOrders.find(x=>x.id===orderId);
+  if(!order || order.items.length === 0){ showToast('لا توجد أصناف'); return; }
+  const labels = [];
+  order.items.forEach(it=>{
+    const labelCount = Math.max(1, Math.ceil(it.qty / LABEL_BATCH_SIZE));
+    for(let i=0;i<labelCount;i++) labels.push(it.name);
+  });
+  const grid = document.getElementById('labelGridContent');
+  grid.innerHTML = labels.map(n=>`<div class="label-box">${escapeHtml(n)}</div>`).join('');
+  window.print();
+}
+
+function printSingleOrderItemLabel(orderId, idx){
+  const order = draftOrders.find(x=>x.id===orderId);
+  if(!order || !order.items[idx]) return;
+  const it = order.items[idx];
+  const labelCount = Math.max(1, Math.ceil(it.qty / LABEL_BATCH_SIZE));
+  const grid = document.getElementById('labelGridContent');
+  grid.innerHTML = Array.from({length: labelCount}).map(()=>`<div class="label-box">${escapeHtml(it.name)}</div>`).join('');
+  window.print();
 }
 
 function renderDraftOrderItemsList(orderId){
@@ -4392,6 +4535,20 @@ function renderDraftOrderItemsList(orderId){
     list.innerHTML = `<div class="empty" style="padding:20px;">لا توجد أصناف — أضف من البحث تحت</div>`;
     return;
   }
+
+  if(!draftOrderDetailEditMode){
+    list.innerHTML = order.items.map((it, idx)=>`
+      <div class="row">
+        <div class="row-main">
+          <div class="row-name">${escapeHtml(it.name)}</div>
+          <div class="row-sub mono">${it.qty} قطعة × ${plainNum(it.sellPrice)} ${settings.currency} = ${plainNum(it.qty * it.sellPrice)}</div>
+        </div>
+        <button class="icon-btn" onclick="printSingleOrderItemLabel('${orderId}', ${idx})">🏷</button>
+      </div>
+    `).join('');
+    return;
+  }
+
   list.innerHTML = order.items.map((it, idx)=>`
     <div class="row">
       <div class="row-main">
@@ -4409,6 +4566,7 @@ function renderDraftOrderItemsList(orderId){
           style="width:100%;padding:6px 4px;border-radius:8px;border:1.5px solid var(--border-strong);background:var(--surface-soft);color:var(--text);font-size:13px;text-align:center;"
           onchange="updateDraftOrderItem('${orderId}', ${idx}, 'sellPrice', this.value)">
       </div>
+      <button class="icon-btn" onclick="printSingleOrderItemLabel('${orderId}', ${idx})">🏷</button>
       <button class="icon-btn" onclick="removeDraftOrderItem('${orderId}', ${idx})">🗑</button>
     </div>
   `).join('');
