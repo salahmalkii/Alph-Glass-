@@ -901,6 +901,24 @@ let editingGroupId = null;
 let loginLog = [];
 
 const catLabel = { glass: 'زجاج حماية', acc: 'إكسسوارات', other: 'أخرى' };
+
+function matchesModel(text, model){
+  const t = (text || '').toLowerCase();
+  const m = (model || '').toLowerCase().trim();
+  if(!m) return false;
+  const escaped = m.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  try{
+    const re = new RegExp('(?<![a-z0-9])' + escaped + '(?![a-z0-9])', 'i');
+    return re.test(t);
+  }catch(e){
+    return t.includes(m);
+  }
+}
+
+function isExactModel(model, query){
+  return (model || '').trim().toLowerCase() === (query || '').trim().toLowerCase();
+}
+
 function categoryLabel(p){
   const c = p.category || 'other';
   return catLabel[c] || c;
@@ -1404,7 +1422,7 @@ function renderInventory(){
   if(q){
     const nameMatches = filtered.filter(p=>p.name.toLowerCase().includes(q));
     const nameMatchIds = new Set(nameMatches.map(p=>p.id));
-    const matchingGroups = compatGroups.filter(g=>g.models.some(m=>m.toLowerCase().includes(q)));
+    const matchingGroups = compatGroups.filter(g=>g.models.some(m=>isExactModel(m, q)));
 
     const groupMatches = filtered.filter(p=>{
       if(nameMatchIds.has(p.id)) return false;
@@ -1413,16 +1431,16 @@ function renderInventory(){
       // 1) Explicit link via the product's compatGroupId field
       if(p.compatGroupId){
         const grp = compatGroups.find(g=>g.id===p.compatGroupId);
-        if(grp) matchedModel = grp.models.find(m=>m.toLowerCase().includes(q));
+        if(grp) matchedModel = grp.models.find(m=>isExactModel(m, q));
       }
 
       // 2) Automatic detection: does the product's own name mention another
       //    model from a group that matches the search term?
       if(!matchedModel){
         for(const grp of matchingGroups){
-          const nameHasOtherModel = grp.models.some(m => p.name.toLowerCase().includes(m.toLowerCase()));
+          const nameHasOtherModel = grp.models.some(m => matchesModel(p.name, m));
           if(nameHasOtherModel){
-            matchedModel = grp.models.find(m=>m.toLowerCase().includes(q));
+            matchedModel = grp.models.find(m=>isExactModel(m, q));
             if(matchedModel) break;
           }
         }
@@ -1883,19 +1901,19 @@ function renderPos(){
   let posCompatMatchInfo = {};
   if(q){
     const nameMatchIds = new Set(filtered.map(p=>p.id));
-    const matchingGroups = compatGroups.filter(g=>g.models.some(m=>m.toLowerCase().includes(q)));
+    const matchingGroups = compatGroups.filter(g=>g.models.some(m=>isExactModel(m, q)));
     const groupMatches = byFilter.filter(p=>{
       if(nameMatchIds.has(p.id)) return false;
       let matchedModel = null;
       if(p.compatGroupId){
         const grp = compatGroups.find(g=>g.id===p.compatGroupId);
-        if(grp) matchedModel = grp.models.find(m=>m.toLowerCase().includes(q));
+        if(grp) matchedModel = grp.models.find(m=>isExactModel(m, q));
       }
       if(!matchedModel){
         for(const grp of matchingGroups){
-          const nameHasOtherModel = grp.models.some(m => p.name.toLowerCase().includes(m.toLowerCase()));
+          const nameHasOtherModel = grp.models.some(m => matchesModel(p.name, m));
           if(nameHasOtherModel){
-            matchedModel = grp.models.find(m=>m.toLowerCase().includes(q));
+            matchedModel = grp.models.find(m=>isExactModel(m, q));
             if(matchedModel) break;
           }
         }
@@ -3608,10 +3626,12 @@ function openCompatGroupForm(id){
       <input type="text" id="grp-desc" value="${g ? escapeHtml(g.description||'') : ''}" placeholder="مثال: زجاج حماية سامسونج A">
     </div>
     <div class="field">
-      <label>الموديلات المتوافقة (كل موديل بسطر لحاله)</label>
-      <textarea id="grp-models" rows="6" style="width:100%;padding:11px 12px;border-radius:11px;border:1.5px solid var(--border-strong);background:var(--surface-soft);font-family:'Cairo',sans-serif;font-size:14.5px;color:var(--text);resize:vertical;" placeholder="Samsung A34
-Samsung A24
-Samsung A54">${g ? g.models.join('\n') : ''}</textarea>
+      <label>الموديلات المتوافقة — مهم: كل موديل بسطر مستقل (أو افصل بينها بفاصلة ،)</label>
+      <textarea id="grp-models" rows="6" style="width:100%;padding:11px 12px;border-radius:11px;border:1.5px solid var(--border-strong);background:var(--surface-soft);font-family:'Cairo',sans-serif;font-size:14.5px;color:var(--text);resize:vertical;" placeholder="A06
+A16
+A17
+A26
+(كل واحد بسطر لحاله — لا تكتبهم كلهم بسطر واحد)">${g ? g.models.join('\n') : ''}</textarea>
     </div>
     <div class="sheet-actions">
       ${g ? `<button class="btn btn-ghost-alert" onclick="deleteCompatGroup('${g.id}')">حذف</button>` : ''}
@@ -3624,7 +3644,7 @@ async function saveCompatGroupForm(){
   const name = document.getElementById('grp-name').value.trim();
   const description = document.getElementById('grp-desc').value.trim();
   const models = document.getElementById('grp-models').value
-    .split('\n').map(s=>s.trim()).filter(s=>s.length>0);
+    .split(/[\n,،]/).map(s=>s.trim()).filter(s=>s.length>0);
 
   if(!name){ showToast('أدخل اسم المجموعة'); return; }
   if(models.length === 0){ showToast('أضف موديل واحد على الأقل'); return; }
@@ -3934,43 +3954,76 @@ function renderLabelProductResults(){
   const q = (document.getElementById('labelProductSearch')?.value || '').trim().toLowerCase();
   const el = document.getElementById('labelProductResults');
   if(!q){ el.innerHTML = ''; return; }
-  const matches = products.filter(p=>p.name.toLowerCase().includes(q)).slice(0,6);
+
+  const nameMatches = products.filter(p=>p.name.toLowerCase().includes(q));
+  const nameMatchIds = new Set(nameMatches.map(p=>p.id));
+  const matchingGroups = compatGroups.filter(g=>g.models.some(m=>isExactModel(m, q)));
+  const labelCompatInfo = {};
+  const compatMatches = products.filter(p=>{
+    if(nameMatchIds.has(p.id)) return false;
+    let matchedModel = null;
+    if(p.compatGroupId){
+      const grp = compatGroups.find(g=>g.id===p.compatGroupId);
+      if(grp) matchedModel = grp.models.find(m=>isExactModel(m, q));
+    }
+    if(!matchedModel){
+      for(const grp of matchingGroups){
+        if(grp.models.some(m => matchesModel(p.name, m))){
+          matchedModel = grp.models.find(m=>isExactModel(m, q));
+          if(matchedModel) break;
+        }
+      }
+    }
+    if(matchedModel){ labelCompatInfo[p.id] = matchedModel; return true; }
+    return false;
+  });
+  const matches = [...nameMatches, ...compatMatches].slice(0,6);
+
   if(matches.length === 0){
     el.innerHTML = `<div class="row-sub" style="margin-bottom:10px;">لا يوجد منتج مطابق</div>`;
     return;
   }
-  el.innerHTML = `<div class="ledger" style="margin-bottom:10px;">${matches.map(p=>`
-    <div class="row" style="cursor:pointer;" onclick="selectLabelProduct('${p.id}')">
-      <div class="row-main"><div class="row-name">${escapeHtml(p.name)}</div></div>
+  el.innerHTML = `<div class="ledger" style="margin-bottom:10px;">${matches.map(p=>{
+    const matchedTerm = labelCompatInfo[p.id];
+    const arg = matchedTerm ? `'${escapeHtml(matchedTerm).replace(/'/g,"\\'")}'` : 'null';
+    return `
+    <div class="row" style="cursor:pointer;" onclick="selectLabelProduct('${p.id}', ${arg})">
+      <div class="row-main">
+        <div class="row-name">${escapeHtml(p.name)}</div>
+        ${matchedTerm ? `<div class="row-sub" style="color:var(--accent-b);">🧩 متوافق مع "${escapeHtml(matchedTerm)}" اللي بحثت عنه</div>` : ''}
+      </div>
     </div>
-  `).join('')}</div>`;
+  `;}).join('')}</div>`;
 }
 
-function selectLabelProduct(productId){
+function selectLabelProduct(productId, labelName){
   const p = products.find(x=>x.id===productId);
   if(!p) return;
+  const name = labelName || p.name;
   document.getElementById('labelProductResults').innerHTML = '';
-  document.getElementById('labelProductSearch').value = p.name;
+  document.getElementById('labelProductSearch').value = name;
   document.getElementById('labelPrintForm').innerHTML = `
+    ${labelName ? `<div class="row-sub" style="margin-bottom:10px;color:var(--accent-b);">الملصق سيُطبع باسم "${escapeHtml(labelName)}" (الصنف الفعلي: ${escapeHtml(p.name)})</div>` : ''}
     <div class="field">
       <label>عدد الملصقات</label>
       <input type="number" inputmode="numeric" id="labelQty" value="${p.qty > 0 ? p.qty : 10}" min="1">
     </div>
     <div class="sheet-actions">
-      <button class="btn btn-brass btn-block" onclick="printProductLabels('${p.id}')">🖨 طباعة</button>
+      <button class="btn btn-brass btn-block" onclick="printProductLabels('${p.id}', ${labelName ? `'${escapeHtml(labelName).replace(/'/g,"\\'")}'` : 'null'})">🖨 طباعة</button>
     </div>
   `;
 }
 
-function printProductLabels(productId){
+function printProductLabels(productId, labelName){
   const p = products.find(x=>x.id===productId);
   if(!p) return;
+  const name = labelName || p.name;
   let qty = parseInt(document.getElementById('labelQty').value);
   if(isNaN(qty) || qty < 1) qty = 1;
   if(qty > 200) qty = 200;
 
   const grid = document.getElementById('labelGridContent');
-  grid.innerHTML = Array.from({length: qty}).map(()=>`<div class="label-box">${escapeHtml(p.name)}</div>`).join('');
+  grid.innerHTML = Array.from({length: qty}).map(()=>`<div class="label-box">${escapeHtml(name)}</div>`).join('');
   window.print();
 }
 
