@@ -1493,6 +1493,7 @@ function renderInventory(){
         <div class="row-name">${escapeHtml(p.name)}</div>
         ${settings.hideProfit ? '' : `<div class="row-sub">هامش الربح: ${plainNum(p.sellPrice - p.buyPrice)} ${settings.currency}</div>`}
         <span class="cat-badge ${catClass}">${escapeHtml(catLbl)}</span>
+        ${p.isNew ? `<span class="cat-badge" style="background:var(--alert-bg);color:var(--accent-a);margin-right:4px;">🆕 جديد</span>` : ''}
         ${p.brand ? `<span class="cat-badge other" style="margin-right:4px;">${escapeHtml(p.brand)}</span>` : ''}
         ${p.glassType ? `<span class="cat-badge glass" style="margin-right:4px;">${escapeHtml(glassTypeLabel[p.glassType] || p.glassType)}</span>` : ''}
         ${grp ? `<span class="cat-badge other" style="margin-right:4px;">🧩 ${escapeHtml(grp.name)}</span>` : ''}
@@ -1555,6 +1556,10 @@ function openProductSheet(id){
         <option value="">— بدون —</option>
         ${compatGroups.map(g=>`<option value="${g.id}" ${p && p.compatGroupId===g.id ? 'selected':''}>${escapeHtml(g.name)}${g.description ? ' — ' + escapeHtml(g.description) : ''}</option>`).join('')}
       </select>
+    </div>
+    <div class="field" style="display:flex;align-items:center;gap:10px;background:var(--surface);border:1.5px solid var(--border);border-radius:10px;padding:12px 14px;">
+      <input type="checkbox" id="f-isnew" ${p && p.isNew ? 'checked' : ''} style="width:18px;height:18px;">
+      <label for="f-isnew" style="margin:0;cursor:pointer;">🆕 وضع علامة "جديد" — يظهر مميّزًا بالقائمة المُرسلة للعملاء</label>
     </div>
     <div class="two-col">
       <div class="field">
@@ -1621,6 +1626,7 @@ async function saveProductForm(){
   const compatGroupId = document.getElementById('f-group').value || null;
   const brand = document.getElementById('f-brand').value.trim() || null;
   const glassType = (category === 'glass' || category === 'زجاج حماية') ? (document.getElementById('f-glasstype').value.trim() || null) : null;
+  const isNew = document.getElementById('f-isnew').checked;
 
   if(!name){ showToast('أدخل اسم الصنف'); return; }
   if(isNaN(buy) || isNaN(sell) || isNaN(qty) || buy<0 || sell<0 || qty<0){
@@ -1634,12 +1640,12 @@ async function saveProductForm(){
     if(p.buyPrice !== buy) logOps.push({ field: 'سعر الشراء', oldValue: p.buyPrice, newValue: buy });
     if(p.sellPrice !== sell) logOps.push({ field: 'سعر البيع', oldValue: p.sellPrice, newValue: sell });
     if(p.qty !== qty) logOps.push({ field: 'الكمية', oldValue: p.qty, newValue: qty });
-    p.name = name; p.buyPrice = buy; p.sellPrice = sell; p.qty = qty; p.category = category; p.compatGroupId = compatGroupId; p.brand = brand; p.glassType = glassType;
+    p.name = name; p.buyPrice = buy; p.sellPrice = sell; p.qty = qty; p.category = category; p.compatGroupId = compatGroupId; p.brand = brand; p.glassType = glassType; p.isNew = isNew;
     logOps.forEach(op=>{
       inventoryLog.unshift({ id: uid(), productId: p.id, productName: name, field: op.field, oldValue: op.oldValue, newValue: op.newValue, date: new Date().toISOString() });
     });
   }else{
-    products.push({ id: uid(), name, buyPrice: buy, sellPrice: sell, qty, category, compatGroupId, brand, glassType });
+    products.push({ id: uid(), name, buyPrice: buy, sellPrice: sell, qty, category, compatGroupId, brand, glassType, isNew });
   }
   await saveProducts();
   if(logOps.length > 0) await saveInventoryLog();
@@ -2114,11 +2120,13 @@ function buildCheckoutSheet(){
   const sheet = document.getElementById('sheetContent');
 
   const checkoutTypeGroups = {};
+  const checkoutTypeQty = {};
   ids.forEach(id=>{
     const p = products.find(x=>x.id===id);
     if(p && p.glassType){
       const typeLabel = glassTypeLabel[p.glassType] || p.glassType;
       checkoutTypeGroups[typeLabel] = (checkoutTypeGroups[typeLabel] || 0) + 1;
+      checkoutTypeQty[typeLabel] = (checkoutTypeQty[typeLabel] || 0) + cart[id];
     }
   });
   const checkoutTypeNames = Object.keys(checkoutTypeGroups).filter(t=>checkoutTypeGroups[t] > 1);
@@ -2219,6 +2227,16 @@ function buildCheckoutSheet(){
         <div class="l">الإجمالي</div>
       </div>
     </div>
+    ${Object.keys(checkoutTypeQty).length > 0 ? `
+    <div class="ledger" style="margin-bottom:14px;">
+      ${Object.entries(checkoutTypeQty).sort((a,b)=>b[1]-a[1]).map(([t,q])=>`
+        <div class="row">
+          <div class="row-main"><div class="row-name">${escapeHtml(t)}</div></div>
+          <div class="qty-pill">${q} قطعة</div>
+        </div>
+      `).join('')}
+    </div>
+    ` : ''}
     <div class="sheet-actions">
       <button class="btn btn-outline" onclick="closeOverlay()">تراجع</button>
       <button class="btn btn-brass" onclick="confirmSale()">${checkoutPaymentMethod==='credit' ? 'تسجيل كدين وطباعة' : 'تأكيد وطباعة'}</button>
@@ -4137,12 +4155,14 @@ function buildCatalogText(type){
       }
       const namesToList = grp ? grp.models : [p.name];
       const brandKey = p.brand || 'أخرى';
+      const typeKey = p.glassType ? (glassTypeLabel[p.glassType] || p.glassType) : 'أخرى';
       namesToList.forEach(name=>{
         const key = name.trim().toLowerCase();
         if(seenGlassNames.has(key)) return;
         seenGlassNames.add(key);
-        if(!brandGroups[brandKey]) brandGroups[brandKey] = [];
-        brandGroups[brandKey].push(name);
+        if(!brandGroups[brandKey]) brandGroups[brandKey] = {};
+        if(!brandGroups[brandKey][typeKey]) brandGroups[brandKey][typeKey] = [];
+        brandGroups[brandKey][typeKey].push({ name, isNew: !!p.isNew });
       });
     });
     const brandNames = Object.keys(brandGroups).sort((a,b)=>{
@@ -4152,9 +4172,19 @@ function buildCatalogText(type){
     });
     brandNames.forEach(brand=>{
       lines.push(`*📱 ${brand}*`);
-      brandGroups[brand]
-        .sort((a,b)=> a.localeCompare(b, undefined, {numeric:true, sensitivity:'base'}))
-        .forEach(name=>{ lines.push(`✅ ${name}`); });
+      const typeNames = Object.keys(brandGroups[brand]).sort((a,b)=>{
+        if(a==='أخرى') return 1;
+        if(b==='أخرى') return -1;
+        return a.localeCompare(b);
+      });
+      typeNames.forEach(typeKey=>{
+        if(typeKey !== 'أخرى') lines.push(`_${typeKey}_`);
+        brandGroups[brand][typeKey]
+          .sort((a,b)=> a.name.localeCompare(b.name, undefined, {numeric:true, sensitivity:'base'}))
+          .forEach(item=>{
+            lines.push(item.isNew ? `🆕 *${item.name}* (جديد!)` : `✅ ${item.name}`);
+          });
+      });
       lines.push('');
     });
     if(lines[lines.length-1] === '') lines.pop();
@@ -4163,7 +4193,7 @@ function buildCatalogText(type){
       if(type==='traders'){
         lines.push(`${p.name} — ${plainNum(p.sellPrice)} ${settings.currency}`);
       }else{
-        lines.push(`✅ ${p.name}`);
+        lines.push(p.isNew ? `🆕 *${p.name}* (جديد!)` : `✅ ${p.name}`);
       }
     });
   }
