@@ -1144,7 +1144,8 @@ async function attemptFingerprintUnlock(){
     checkAutoBackup();
     setupAutoLock();
   }catch(e){
-    if(errorEl) errorEl.textContent = 'تعذر التحقق من البصمة، جرّب كلمة المرور';
+    const errName = e && e.name ? e.name : 'خطأ غير معروف';
+    if(errorEl) errorEl.textContent = `تعذر التحقق من البصمة (${errName}) — جرّب كلمة المرور`;
   }
 }
 
@@ -5191,7 +5192,8 @@ async function toggleProfitQuickVisibility(){
       renderAll();
       return;
     }catch(e){
-      // fingerprint failed or was cancelled — fall through to PIN
+      const errName = e && e.name ? e.name : 'خطأ غير معروف';
+      showToast(`تعذّرت البصمة (${errName}) — جرّب الرمز`);
     }
   }
 
