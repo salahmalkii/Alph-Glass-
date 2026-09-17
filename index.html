@@ -583,6 +583,9 @@
       <div class="lbl">أصناف منخفضة</div>
       <div class="val mono" id="lowStockCount">0</div>
     </div>
+    <div class="today-card" id="profitEyeCard" style="flex:0 0 auto;cursor:pointer;justify-content:center;" onclick="toggleProfitQuickVisibility()">
+      <div class="val mono" id="profitEyeIcon" style="font-size:20px;">👁</div>
+    </div>
   </div>
 </header>
 
@@ -1341,8 +1344,10 @@ function renderHeaderStrip(){
   const todays = invoices.filter(i=>i.date.slice(0,10)===t);
   const sales = todays.reduce((a,i)=>a+i.total,0);
   const profit = todays.reduce((a,i)=>a+i.profit,0);
-  document.getElementById('todaySales').textContent = plainNum(sales);
+  document.getElementById('todaySales').textContent = settings.hideProfit ? '•••' : plainNum(sales);
   document.getElementById('todayProfit').textContent = settings.hideProfit ? '•••' : plainNum(profit);
+  const eyeIcon = document.getElementById('profitEyeIcon');
+  if(eyeIcon) eyeIcon.textContent = settings.hideProfit ? '🙈' : '👁';
   const low = products.filter(p=>p.qty <= LOW_STOCK_THRESHOLD).length;
   document.getElementById('lowStockCount').textContent = low;
 }
@@ -5159,6 +5164,70 @@ function openSettings(){
   `;
   openOverlay();
   onHideProfitChange();
+}
+
+async function toggleProfitQuickVisibility(){
+  if(!settings.hideProfit){
+    settings.hideProfit = true;
+    await saveSettings();
+    renderAll();
+    return;
+  }
+
+  if(settings.fingerprintCredentialId){
+    try{
+      const credIdBytes = Uint8Array.from(atob(settings.fingerprintCredentialId), c=>c.charCodeAt(0));
+      const challenge = crypto.getRandomValues(new Uint8Array(32));
+      await navigator.credentials.get({
+        publicKey: {
+          challenge,
+          allowCredentials: [{ id: credIdBytes, type: 'public-key' }],
+          userVerification: 'required',
+          timeout: 60000
+        }
+      });
+      settings.hideProfit = false;
+      await saveSettings();
+      renderAll();
+      return;
+    }catch(e){
+      // fingerprint failed or was cancelled — fall through to PIN
+    }
+  }
+
+  if(settings.profitPin){
+    openProfitPinPrompt();
+  }else{
+    showToast('ما فيه بصمة أو رمز محفوظ لإظهار الأرباح — اضبطهم من الإعدادات');
+  }
+}
+
+function openProfitPinPrompt(){
+  const sheet = document.getElementById('sheetContent');
+  sheet.innerHTML = `
+    <div class="sheet-head">
+      <h3>إظهار الأرباح</h3>
+      <button class="icon-btn" onclick="closeOverlay()">✕</button>
+    </div>
+    <div class="field">
+      <label>أدخل رمز الحماية (4 أرقام)</label>
+      <input type="password" inputmode="numeric" maxlength="4" id="quick-pin-input" placeholder="••••" onkeydown="if(event.key==='Enter')confirmProfitPin()">
+    </div>
+    <div class="sheet-actions">
+      <button class="btn btn-brass btn-block" onclick="confirmProfitPin()">تأكيد</button>
+    </div>
+  `;
+  openOverlay();
+  setTimeout(()=>document.getElementById('quick-pin-input')?.focus(), 100);
+}
+
+async function confirmProfitPin(){
+  const val = (document.getElementById('quick-pin-input').value || '').trim();
+  if(val !== settings.profitPin){ showToast('الرمز غير صحيح'); return; }
+  settings.hideProfit = false;
+  await saveSettings();
+  renderAll();
+  closeOverlay();
 }
 
 function onHideProfitChange(){
