@@ -1933,73 +1933,149 @@ function recalcProductSummary(){
 }
 
 async function fetchPhoneDimensions(){
-  const name = (document.getElementById('f-name')?.value || '').trim();
-  const btn = document.getElementById('fetchDimsBtn');
-  const status = document.getElementById('dimFetchStatus');
-  const lenEl = document.getElementById('f-dim-length');
-  const widEl = document.getElementById('f-dim-width');
-  if(!name){ showToast('اكتب اسم الهاتف أولاً'); return; }
-  if(btn){ btn.disabled=true; btn.textContent='⏳ جاري البحث عن الأبعاد...'; }
-  if(status) status.textContent='جاري البحث في قاعدة مواصفات الهواتف...';
+  const name=(document.getElementById('f-name')?.value||'').trim();
+  const btn=document.getElementById('fetchDimsBtn'), status=document.getElementById('dimFetchStatus');
+  const lenEl=document.getElementById('f-dim-length'), widEl=document.getElementById('f-dim-width');
+  if(!name){showToast('اكتب اسم الهاتف أولاً');return;}
+  if(btn){btn.disabled=true;btn.textContent='⏳ جاري البحث...';}
+  if(status)status.textContent='جاري البحث في قاعدة مواصفات الهواتف...';
+
+  const norm=x=>String(x||'').toLowerCase()
+    .normalize('NFD').replace(/[\u0300-\u036f]/g,'')
+    .replace(/[®™]/g,'').replace(/realma/g,'realme')
+    .replace(/xiaomi\s+redmi/g,'redmi').replace(/redmi\s+/g,'redmi ')
+    .replace(/[^a-z0-9]+/g,' ').replace(/\s+/g,' ').trim();
+  const key=norm(name);
+  const tokens=key.split(' ').filter(Boolean);
+
+  // قاعدة محلية سريعة للأكثر استعمالاً، وتستمر في العمل دون إنترنت.
+  const local={
+    'realme c85':[164.0,75.9],'redmi 14c':[171.9,77.8],
+    'realme c75':[165.6,76.1],'realme c71':[163.8,75.7]
+  };
+
+  function parseDims(raw){
+    if(raw==null)return null;
+    const text=String(raw).replace(/,/g,'.');
+    // يقبل: 164 x 75.9 x 7.9 mm أو Dimensions: 164.0 × 75.9 × 7.9 mm
+    const m=text.match(/(\d{2,3}(?:\.\d+)?)\s*(?:x|×|✕|\*)\s*(\d{2,3}(?:\.\d+)?)(?:\s*(?:x|×|✕|\*)\s*(\d{1,2}(?:\.\d+)?))?/i);
+    return m?[parseFloat(m[1]),parseFloat(m[2])]:null;
+  }
+  function scan(obj,depth=0){
+    if(!obj || depth>6)return null;
+    if(typeof obj==='string') return parseDims(obj);
+    if(Array.isArray(obj)){
+      for(const x of obj){const d=scan(x,depth+1);if(d)return d;}
+      return null;
+    }
+    if(typeof obj!=='object')return null;
+    const preferred=['dimensions','dimension','body_dimensions','bodyDimensions','Body','body','specifications','Specifications','detailSpec','data','phone','device'];
+    for(const k of preferred){
+      if(obj[k]!=null){
+        if(typeof obj[k]==='string'){const d=parseDims(obj[k]);if(d)return d;}
+        else {const d=scan(obj[k],depth+1);if(d)return d;}
+      }
+    }
+    // أخيرًا ابحث في جميع القيم النصية، لأن APIs مختلفة في أسماء الحقول.
+    for(const [k,v] of Object.entries(obj)){
+      if(/dimension|body/i.test(k) && typeof v==='string'){const d=parseDims(v);if(d)return d;}
+    }
+    return null;
+  }
+  function nameScore(candidate){
+    const c=norm(candidate);
+    if(!c)return -1;
+    if(c===key)return 1000;
+    if(c.includes(key))return 900-key.length;
+    if(key.includes(c))return 850-c.length;
+    let hit=0; for(const t of tokens){if(t.length>=2 && c.includes(t))hit++;}
+    return hit*100 - Math.abs(c.length-key.length);
+  }
+  function pick(list){
+    if(!Array.isArray(list))return null;
+    let best=null,bestScore=-Infinity;
+    for(const x of list){
+      const n=x?.phone_name||x?.name||x?.model||x?.title||x?.device_name||'';
+      const sc=nameScore(n);
+      if(sc>bestScore){bestScore=sc;best=x;}
+    }
+    return bestScore>=100?best:null;
+  }
+  async function getJson(url){
+    const r=await fetch(url,{cache:'no-store',headers:{'Accept':'application/json'}});
+    if(!r.ok)throw new Error('HTTP '+r.status);
+    return await r.json();
+  }
+
   try{
-    const clean = name.toLowerCase().replace(/[®™]/g,'').replace(/\s+/g,' ').trim();
-    const known = {
-      'realme c85': [164.0,75.9],
-      'realma c85': [164.0,75.9],
-      'redmi 14c': [171.9,77.8]
-    };
-    let found = known[clean] || null;
+    let found=local[key]||null;
+
+    // 1) API الحالية: لا نستخدم /search لأنه معروف أنه معطل في النشر الحالي؛
+    // نستخدم قائمة الشركات ثم قائمة أجهزة الشركة ثم صفحة الجهاز.
     if(!found){
-      const brandAliases = {
-        samsung:'samsung-phones-9', apple:'apple-phones-48', iphone:'apple-phones-48',
-        xiaomi:'xiaomi-phones-80', redmi:'xiaomi-phones-80', poco:'poco-phones-127',
-        realme:'realme-phones-118', realma:'realme-phones-118', oppo:'oppo-phones-82',
-        oneplus:'oneplus-phones-95', vivo:'vivo-phones-98', infinix:'infinix-phones-119',
-        honor:'honor-phones-121', huawei:'huawei-phones-58', motorola:'motorola-phones-4',
-        nokia:'nokia-phones-1', tecno:'tecno-phones-120', google:'google-phones-107'
-      };
-      const words=clean.split(' ');
-      const brandKey=words[0];
-      const brandSlug=brandAliases[brandKey];
-      if(brandSlug){
-        const r=await fetch('https://phone-specs-api.vercel.app/brands/'+brandSlug,{cache:'no-store'});
-        if(r.ok){
-          const j=await r.json();
-          const phones=j?.data?.phones||[];
-          const wanted=clean.replace(new RegExp('^'+brandKey+'\\s+'),'').trim();
-          const hit=phones.find(x=>{
-            const n=(x.phone_name||'').toLowerCase().replace(/\s+/g,' ').trim();
-            return n===wanted || n===clean || n.includes(wanted) || wanted.includes(n);
-          });
-          if(hit?.slug){
-            const d=await fetch('https://phone-specs-api.vercel.app/'+hit.slug,{cache:'no-store'});
-            if(d.ok){
-              const dj=await d.json();
-              const data=dj?.data||dj;
-              const raw=data?.specifications?.dimensions || data?.dimensions || '';
-              const m=String(raw).match(/([0-9]+(?:\.[0-9]+)?)\s*[x×]\s*([0-9]+(?:\.[0-9]+)?)/i);
-              if(m) found=[parseFloat(m[1]),parseFloat(m[2])];
+      const base='https://phone-specs-api.vercel.app';
+      try{
+        const bj=await getJson(base+'/brands');
+        const brands=bj?.data?.brands||bj?.data||bj?.brands||[];
+        const brandWords=tokens.filter(t=>['samsung','apple','xiaomi','redmi','realme','oppo','vivo','infinix','tecno','honor','oneplus','google','huawei','motorola','nokia','sony','asus','zte','lenovo','nothing'].includes(t));
+        const brand=Array.isArray(brands)?brands.find(b=>{
+          const bn=norm(b?.brand_name||b?.name||b?.title||'');
+          return brandWords.some(w=>bn===w || bn.includes(w));
+        }):null;
+        const brandUrl=brand?.detail||brand?.url||brand?.slug;
+        if(brandUrl){
+          const listUrl=String(brandUrl).startsWith('http')?brandUrl:(base+'/brands/'+String(brandUrl).replace(/^\//,''));
+          const lj=await getJson(listUrl);
+          const phones=lj?.data?.phones||lj?.data||lj?.phones||[];
+          const hit=pick(phones);
+          if(hit){
+            const d1=scan(hit);
+            if(d1)found=d1;
+            const detail=hit.detail||hit.url||hit.specs||hit.link;
+            if(!found && detail){
+              const dj=await getJson(String(detail).startsWith('http')?detail:(base+'/'+String(detail).replace(/^\//,'')));
+              found=scan(dj);
             }
           }
         }
-      }
+      }catch(e){ /* ننتقل للمصدر التالي */ }
     }
+
+    // 2) Wikipedia API كاحتياطي. لا يحتاج مفتاحاً ويدعم origin=* من المتصفح.
+    if(!found){
+      try{
+        const q=encodeURIComponent(name+' smartphone dimensions');
+        const u='https://en.wikipedia.org/w/api.php?action=query&list=search&srsearch='+q+'&format=json&origin=*';
+        const sj=await getJson(u);
+        const hits=sj?.query?.search||[];
+        for(const h of hits.slice(0,5)){
+          const page=await getJson('https://en.wikipedia.org/w/api.php?action=query&prop=extracts&explaintext=1&exintro=0&titles='+encodeURIComponent(h.title)+'&format=json&origin=*');
+          const pages=page?.query?.pages||{};
+          const txt=Object.values(pages)[0]?.extract||'';
+          const d=parseDims(txt);
+          if(d){found=d;break;}
+        }
+      }catch(e){ /* لا نوقف المستخدم */ }
+    }
+
     if(found){
       lenEl.value=found[0]; widEl.value=found[1];
-      if(status) status.textContent='✅ تم جلب الأبعاد: '+found[0]+' × '+found[1]+' mm';
-      showToast('تم جلب أبعاد الهاتف');
+      // حفظها أيضًا في قاعدة التوافق الداخلية باسم المنتج الحالي.
+      const saveKey=normalizeDimModel(name);
+      if(saveKey){compatDimensions[saveKey]={length:found[0],width:found[1],displayName:name}; try{await saveCompatDimensions();}catch(e){} }
+      if(status)status.textContent='✅ تم جلب الأبعاد تلقائيًا: '+found[0]+' × '+found[1]+' mm';
+      showToast('تم جلب الأبعاد بنجاح');
     }else{
-      if(status) status.textContent='⚠️ لم يتم العثور على الأبعاد. يمكنك إدخالها يدويًا.';
-      showToast('لم يتم العثور على أبعاد هذا الهاتف');
+      if(status)status.textContent='⚠️ تعذر العثور على الأبعاد تلقائيًا. يمكنك إدخالها يدويًا.';
+      showToast('لم يتم العثور على الأبعاد');
     }
   }catch(e){
-    if(status) status.textContent='⚠️ تعذر الاتصال بمصدر المواصفات. يمكنك إدخال الأبعاد يدويًا.';
-    showToast('تعذر جلب الأبعاد تلقائيًا');
+    if(status)status.textContent='⚠️ تعذر الاتصال بمصدر المواصفات. يمكنك إدخال الأبعاد يدويًا.';
+    showToast('تعذر جلب الأبعاد');
   }finally{
-    if(btn){ btn.disabled=false; btn.textContent='📐 جلب الأبعاد تلقائيًا'; }
+    if(btn){btn.disabled=false;btn.textContent='📐 جلب الأبعاد تلقائيًا';}
   }
 }
-
 async function saveProductForm(){
   const name = document.getElementById('f-name').value.trim();
   const buy = parseFloat(document.getElementById('f-buy').value);
