@@ -111,6 +111,12 @@
   }
   .today-card .lbl{font-size:11px;color:var(--muted);}
   .today-card .val{font-size:17px;font-weight:700;margin-top:2px;color:var(--text);}
+  #todaySalesCard{background:rgba(255,184,77,.12);border-color:rgba(255,184,77,.35);}
+  #todaySalesCard .val{color:#FFB84D;}
+  #todayProfitCard{background:rgba(47,191,143,.12);border-color:rgba(47,191,143,.35);}
+  #todayProfitCard .val{color:var(--profit);}
+  #lowStockCard{background:rgba(224,86,86,.12);border-color:rgba(224,86,86,.35);}
+  #lowStockCard .val{color:var(--alert);}
 
   /* ===== Screens ===== */
   main{padding:16px;}
@@ -568,10 +574,12 @@
     <div style="display:flex;gap:8px;">
       <button class="gear-btn" id="headerSearchBtn" onclick="openGlobalSearch()">🔍</button>
       <button class="gear-btn" id="headerHomeBtn" onclick="switchScreen('home')">🏠</button>
+      <button class="gear-btn" onclick="openSettings()">⚙</button>
+      <button class="gear-btn" id="profitEyeIcon" style="font-size:16px;" onclick="toggleProfitQuickVisibility()">👁</button>
     </div>
   </div>
   <div class="today-strip">
-    <div class="today-card">
+    <div class="today-card" id="todaySalesCard">
       <div class="lbl">مبيعات اليوم</div>
       <div class="val mono" id="todaySales">0</div>
     </div>
@@ -579,12 +587,9 @@
       <div class="lbl">ربح اليوم</div>
       <div class="val mono" id="todayProfit">0</div>
     </div>
-    <div class="today-card" id="lowStockCard">
+    <div class="today-card" id="lowStockCard" style="cursor:pointer;" onclick="openLowStockList()">
       <div class="lbl">أصناف منخفضة</div>
       <div class="val mono" id="lowStockCount">0</div>
-    </div>
-    <div class="today-card" id="profitEyeCard" style="flex:0 0 auto;cursor:pointer;justify-content:center;" onclick="toggleProfitQuickVisibility()">
-      <div class="val mono" id="profitEyeIcon" style="font-size:20px;">👁</div>
     </div>
   </div>
 </header>
@@ -641,94 +646,8 @@
 
   <!-- ===== HOME DASHBOARD ===== -->
   <section class="screen active" id="screen-home">
-    <div class="section-title"><span>الرئيسية</span></div>
-    <div class="home-grid">
-      <div class="home-tile" onclick="switchScreen('sell')">
-        <div class="home-tile-icon">🧾</div>
-        <div class="home-tile-label">بيع</div>
-      </div>
-      <div class="home-tile" onclick="switchScreen('orders')">
-        <div class="home-tile-icon">📋</div>
-        <div class="home-tile-label">الطلبيات</div>
-        <span class="home-tile-badge" id="homeOrdersBadge" style="display:none;"></span>
-      </div>
-      <div class="home-tile" onclick="switchScreen('invoices')">
-        <div class="home-tile-icon">📜</div>
-        <div class="home-tile-label">الفواتير</div>
-      </div>
-      <div class="home-tile" onclick="switchScreen('customers')">
-        <div class="home-tile-icon">👤</div>
-        <div class="home-tile-label">العملاء</div>
-      </div>
-      <div class="home-tile" onclick="switchScreen('inventory')">
-        <div class="home-tile-icon">📦</div>
-        <div class="home-tile-label">المخزون</div>
-      </div>
-      <div class="home-tile" onclick="switchScreen('profits')">
-        <div class="home-tile-icon">📈</div>
-        <div class="home-tile-label">الأرباح</div>
-      </div>
-      <div class="home-tile" onclick="openDailyClosing()">
-        <div class="home-tile-icon">📊</div>
-        <div class="home-tile-label">ملخص اليوم</div>
-      </div>
-      <div class="home-tile" onclick="openExpenses()">
-        <div class="home-tile-icon">💸</div>
-        <div class="home-tile-label">المصاريف</div>
-      </div>
-      <div class="home-tile" onclick="openSuppliers()">
-        <div class="home-tile-icon">🏭</div>
-        <div class="home-tile-label">الموردين</div>
-      </div>
-      <div class="home-tile" onclick="openPurchaseList()">
-        <div class="home-tile-icon">🛒</div>
-        <div class="home-tile-label">قائمة الشراء</div>
-      </div>
-      <div class="home-tile" onclick="openOverdueDebts()">
-        <div class="home-tile-icon">⏰</div>
-        <div class="home-tile-label">ديون متأخرة</div>
-      </div>
-      <div class="home-tile" onclick="openInventoryLog()">
-        <div class="home-tile-icon">📝</div>
-        <div class="home-tile-label">سجل المخزون</div>
-      </div>
-      <div class="home-tile" onclick="openCompatGroups()">
-        <div class="home-tile-icon">🧩</div>
-        <div class="home-tile-label">مجموعات التوافق</div>
-      </div>
-      <div class="home-tile" onclick="openProductCatalog()">
-        <div class="home-tile-icon">📤</div>
-        <div class="home-tile-label">قائمة المنتجات</div>
-      </div>
-      <div class="home-tile" onclick="openLoginLog()">
-        <div class="home-tile-icon">🔑</div>
-        <div class="home-tile-label">سجل الدخول</div>
-      </div>
-      <div class="home-tile" onclick="openMonthComparison()">
-        <div class="home-tile-icon">📆</div>
-        <div class="home-tile-label">الإحصائيات</div>
-      </div>
-      <div class="home-tile" onclick="openLabelPrint()">
-        <div class="home-tile-icon">🏷</div>
-        <div class="home-tile-label">طباعة ملصق</div>
-      </div>
-      <div class="home-tile" onclick="openDailySoldReport()">
-        <div class="home-tile-icon">📦</div>
-        <div class="home-tile-label">المبيعات حسب الصنف</div>
-      </div>
-      <div class="home-tile" onclick="openGlobalSearch()">
-        <div class="home-tile-icon">🔍</div>
-        <div class="home-tile-label">بحث شامل</div>
-      </div>
-      <div class="home-tile" onclick="openBackup()">
-        <div class="home-tile-icon">💾</div>
-        <div class="home-tile-label">نسخة احتياطية</div>
-      </div>
-      <div class="home-tile" onclick="openSettings()">
-        <div class="home-tile-icon">⚙</div>
-        <div class="home-tile-label">الإعدادات</div>
-      </div>
-    </div>
+    <div class="section-title" style="color:#9B6FDE;"><span>⚡ اختصاراتي</span></div>
+    <div class="home-grid" id="homeGrid"></div>
   </section>
 
   <!-- ===== SELL / POS ===== -->
@@ -873,7 +792,7 @@ let products = [];
 let invoices = [];
 let customers = [];
 let customerTx = [];
-let settings = { shopName: "Alpha Glass", currency: "ر.س", hideProfit: false, profitPin: "", shopPhone: "", appPassword: "", fingerprintCredentialId: "", friendPhone: "", autoLockMinutes: 0, limitedPassword: "" };
+let settings = { shopName: "Alpha Glass", currency: "ر.س", hideProfit: false, profitPin: "", shopPhone: "", appPassword: "", fingerprintCredentialId: "", friendPhone: "", autoLockMinutes: 0, limitedPassword: "", homeTiles: ['sell','inventory','invoices','customers','orders','debts'] };
 let cart = {}; // productId -> qty
 let cartDisplayName = {}; // productId -> alternate name to sell/print under (from a compat group)
 let cartOverride = {}; // productId -> edited price for current checkout
@@ -1313,7 +1232,7 @@ function applyScreenSwitch(name){
   if(name === 'customers') renderCustomers();
   if(name === 'inventory') renderInventory();
   if(name === 'orders') renderOrdersScreen();
-  if(name === 'home') updateOrdersNavBadge();
+  if(name === 'home'){ renderHomeGrid(); updateOrdersNavBadge(); }
 }
 function fabAction(){
   const active = document.querySelector('.screen.active');
@@ -1329,6 +1248,7 @@ function renderAll(){
   renderProfits();
   renderCustomers();
   renderHeaderStrip();
+  renderHomeGrid();
   updateOrdersNavBadge();
   document.getElementById('shopNameDisplay').textContent = settings.shopName || 'متجري';
 }
@@ -1345,6 +1265,76 @@ function updateOrdersNavBadge(){
     if(count > 0){ homeBadge.textContent = count; homeBadge.style.display = 'block'; }
     else{ homeBadge.style.display = 'none'; }
   }
+}
+
+function openLowStockList(){
+  const sheet = document.getElementById('sheetContent');
+  const low = products.filter(p=>p.qty <= LOW_STOCK_THRESHOLD).sort((a,b)=>a.qty-b.qty);
+  sheet.innerHTML = `
+    <div class="sheet-head">
+      <h3>⚠️ الأصناف المنخفضة (${low.length})</h3>
+      <button class="icon-btn" onclick="closeOverlay()">✕</button>
+    </div>
+    ${low.length === 0 ? `<div class="empty"><span class="big">✅</span>ما فيه أصناف منخفضة حاليًا</div>` : `
+    <div class="ledger">
+      ${low.map(p=>`
+        <div class="row" style="cursor:pointer;" onclick="switchScreen('inventory');openProductSheet('${p.id}');">
+          <div class="row-main">
+            <div class="row-name">${escapeHtml(p.name)}</div>
+            <div class="row-sub">متبقي: ${p.qty} قطعة</div>
+          </div>
+        </div>
+      `).join('')}
+    </div>
+    `}
+  `;
+  openOverlay();
+}
+
+const ALL_HOME_FEATURES = [
+  { id:'sell', icon:'🧾', color:'#4a86e0', title:'بيع', action:"switchScreen('sell')" },
+  { id:'orders', icon:'📋', color:'#2fbfa8', title:'الطلبيات', action:"switchScreen('orders')" },
+  { id:'invoices', icon:'📜', color:'#e0a83a', title:'الفواتير', action:"switchScreen('invoices')" },
+  { id:'customers', icon:'👤', color:'#a15be0', title:'العملاء', action:"switchScreen('customers')" },
+  { id:'inventory', icon:'📦', color:'#2fbf8f', title:'المخزون', action:"switchScreen('inventory')" },
+  { id:'profits', icon:'📈', color:'#2fbf8f', title:'الأرباح', action:"switchScreen('profits')" },
+  { id:'dailyClosing', icon:'📊', color:'#4a86e0', title:'ملخص اليوم', action:"openDailyClosing()" },
+  { id:'expenses', icon:'💸', color:'#e05680', title:'المصاريف', action:"openExpenses()" },
+  { id:'suppliers', icon:'🏭', color:'#2fbfa8', title:'الموردين', action:"openSuppliers()" },
+  { id:'purchaseList', icon:'🛒', color:'#4a86e0', title:'قائمة الشراء', action:"openPurchaseList()" },
+  { id:'debts', icon:'⏰', color:'#e0703a', title:'ديون متأخرة', action:"openOverdueDebts()" },
+  { id:'invLog', icon:'📝', color:'#5a5a5a', title:'سجل المخزون', action:"openInventoryLog()" },
+  { id:'compatGroups', icon:'🧩', color:'#e0a83a', title:'مجموعات التوافق', action:"openCompatGroups()" },
+  { id:'productCatalog', icon:'📤', color:'#a15be0', title:'قائمة المنتجات', action:"openProductCatalog()" },
+  { id:'loginLog', icon:'🔑', color:'#5a5a5a', title:'سجل الدخول', action:"openLoginLog()" },
+  { id:'statistics', icon:'📆', color:'#4a86e0', title:'الإحصائيات', action:"openMonthComparison()" },
+  { id:'labelPrint', icon:'🏷', color:'#e05680', title:'طباعة ملصق', action:"openLabelPrint()" },
+  { id:'soldReport', icon:'📦', color:'#2fbf8f', title:'المبيعات حسب الصنف', action:"openDailySoldReport()" },
+  { id:'backup', icon:'💾', color:'#2fbf8f', title:'نسخة احتياطية', action:"openBackup()" },
+];
+
+function homeHexToRgba(hex, alpha){
+  const r = parseInt(hex.slice(1,3),16);
+  const g = parseInt(hex.slice(3,5),16);
+  const b = parseInt(hex.slice(5,7),16);
+  return `rgba(${r},${g},${b},${alpha})`;
+}
+
+function renderHomeGrid(){
+  const grid = document.getElementById('homeGrid');
+  if(!grid) return;
+  const tiles = (settings.homeTiles && settings.homeTiles.length > 0) ? settings.homeTiles : ALL_HOME_FEATURES.slice(0,6).map(f=>f.id);
+  grid.innerHTML = tiles.map(id=>{
+    const f = ALL_HOME_FEATURES.find(x=>x.id===id);
+    if(!f) return '';
+    const badge = f.id === 'orders' ? `<span class="home-tile-badge" id="homeOrdersBadge" style="display:none;"></span>` : '';
+    return `<div class="home-tile" onclick="${f.action}" style="background:${homeHexToRgba(f.color,.14)};border-color:${homeHexToRgba(f.color,.4)};">
+      <div class="home-tile-icon" style="background:${f.color};border-radius:12px;width:40px;height:40px;display:flex;align-items:center;justify-content:center;margin:0 auto 6px;">${f.icon}</div>
+      <div class="home-tile-label">${f.title}</div>
+      ${badge}
+    </div>`;
+  }).join('');
+  if(typeof updateOrdersNavBadge === 'function') updateOrdersNavBadge();
 }
 
 function renderHeaderStrip(){
@@ -4645,6 +4635,18 @@ function openDailyClosing(){
   const expensesToday = expenses.filter(e=>e.date.slice(0,10)===today).reduce((a,e)=>a+e.amount,0);
   const netCash = cashCollected - expensesToday;
 
+  const itemStats = {};
+  todaysInvoices.forEach(inv=>{
+    inv.items.forEach(it=>{
+      if(!itemStats[it.name]) itemStats[it.name] = { qty: 0, profit: 0 };
+      const unitCost = it.buyPrice || 0;
+      const unitProfit = it.sellPrice - unitCost;
+      itemStats[it.name].qty += it.qty;
+      itemStats[it.name].profit += unitProfit * it.qty;
+    });
+  });
+  const itemStatsList = Object.entries(itemStats).sort((a,b)=> b[1].qty - a[1].qty);
+
   sheet.innerHTML = `
     <div class="sheet-head">
       <h3>ملخص إغلاق اليوم</h3>
@@ -4681,6 +4683,22 @@ function openDailyClosing(){
         <div class="l">صافي النقد بجيبك</div>
       </div>
     </div>
+    ${itemStatsList.length > 0 ? `
+    <div class="section-title"><span>تفصيل الأرباح حسب الصنف</span></div>
+    <div class="ledger">
+      ${itemStatsList.map(([name, s])=>{
+        const perUnit = s.qty > 0 ? s.profit / s.qty : 0;
+        return `
+        <div class="row">
+          <div class="row-main">
+            <div class="row-name">${escapeHtml(name)}</div>
+            <div class="row-sub">${s.qty} قطعة${settings.hideProfit ? '' : ' · ربح القطعة: ' + plainNum(perUnit) + ' ' + settings.currency}</div>
+          </div>
+          ${settings.hideProfit ? '' : `<div class="mono" style="font-weight:700;color:var(--profit);">${plainNum(s.profit)}</div>`}
+        </div>`;
+      }).join('')}
+    </div>
+    ` : ''}
   `;
   openOverlay();
 }
@@ -5065,13 +5083,75 @@ async function deleteDraftOrder(orderId){
   showToast('تم حذف الطلبية');
 }
 
+function openHomeTilesPicker(){
+  const sheet = document.getElementById('sheetContent');
+  window._tempHomeTiles = [...(settings.homeTiles || [])];
+  sheet.innerHTML = `
+    <div class="sheet-head">
+      <h3 style="color:#9B6FDE;">تخصيص اختصارات الرئيسية</h3>
+      <button class="icon-btn" onclick="openSettings()">✕</button>
+    </div>
+    <div class="row-sub" style="margin-bottom:14px;">اضغط على أي ميزة لإضافتها أو حذفها من الرئيسية (حد أقصى 6)</div>
+    <div class="ledger" id="homeTilesPickList"></div>
+    <div class="sheet-actions">
+      <button class="btn btn-outline" onclick="openSettings()">تراجع</button>
+      <button class="btn btn-brass" onclick="saveHomeTiles()">💾 حفظ الاختيار</button>
+    </div>
+  `;
+  renderHomeTilesPickList();
+  openOverlay();
+}
+
+function renderHomeTilesPickList(){
+  const list = document.getElementById('homeTilesPickList');
+  if(!list) return;
+  list.innerHTML = ALL_HOME_FEATURES.map(f=>{
+    const isSel = window._tempHomeTiles.includes(f.id);
+    return `
+    <div class="row" style="cursor:pointer;${isSel ? 'border-color:'+homeHexToRgba(f.color,.5)+';background:'+homeHexToRgba(f.color,.08)+';' : ''}" onclick="toggleHomeTile('${f.id}')">
+      <div class="row-main">
+        <div class="row-name">${f.icon} ${escapeHtml(f.title)}</div>
+      </div>
+      <div class="qty-pill" style="${isSel ? 'background:'+f.color+';color:#1a1305;' : ''}">${isSel ? '✓' : ''}</div>
+    </div>`;
+  }).join('');
+}
+
+function toggleHomeTile(id){
+  const idx = window._tempHomeTiles.indexOf(id);
+  if(idx > -1){
+    window._tempHomeTiles.splice(idx,1);
+  }else{
+    if(window._tempHomeTiles.length >= 6){ showToast('أقصى شي 6 اختصارات — احذف وحدة أول'); return; }
+    window._tempHomeTiles.push(id);
+  }
+  renderHomeTilesPickList();
+}
+
+async function saveHomeTiles(){
+  if(window._tempHomeTiles.length === 0){ showToast('اختر اختصار واحد على الأقل'); return; }
+  settings.homeTiles = [...window._tempHomeTiles];
+  await saveSettings();
+  renderHomeGrid();
+  openSettings();
+  showToast('تم حفظ اختصاراتك');
+}
+
 function openSettings(){
   const sheet = document.getElementById('sheetContent');
   const hasPin = !!settings.profitPin;
   sheet.innerHTML = `
     <div class="sheet-head">
-      <h3>إعدادات المتجر</h3>
+      <h3 style="color:#9B6FDE;">إعدادات المتجر</h3>
       <button class="icon-btn" onclick="closeOverlay()">✕</button>
+    </div>
+    <div class="ledger" style="margin-bottom:16px;">
+      <div class="row" style="cursor:pointer;" onclick="openHomeTilesPicker()">
+        <div class="row-main">
+          <div class="row-name">🏠 تخصيص اختصارات الرئيسية</div>
+          <div class="row-sub">اختر حتى 6 اختصارات تظهر بالصفحة الرئيسية</div>
+        </div>
+      </div>
     </div>
     <div class="field">
       <label>اسم المتجر (يظهر في الفاتورة)</label>
