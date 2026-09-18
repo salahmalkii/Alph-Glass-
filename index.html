@@ -1675,10 +1675,15 @@ function openAllFeaturesMenu(){
   window.__alphaFeatureGroups = groups;
 }
 
+let __alphaFeatureCategory = null;
+let __alphaFeatureReturnCategory = null;
+
 function openFeatureCategory(id){
   const groups = window.__alphaFeatureGroups || [];
   const g = groups.find(x=>x.id===id);
   if(!g) return;
+  __alphaFeatureCategory = id;
+  __alphaFeatureReturnCategory = null;
   const sheet = document.getElementById('sheetContent');
   sheet.innerHTML = `
     <div class="sheet-head">
@@ -6169,17 +6174,25 @@ async function saveHomeTiles(){
 }
 
 function runFeatureAction(action){
-  // أغلق نافذة الميزات قبل الانتقال إلى شاشة/نافذة أخرى، مع الحفاظ على تاريخ الشاشة الحالية.
-  const ov = document.getElementById('overlay');
-  if(ov && ov.classList.contains('active')){
-    if(overlayHistoryPushed){
-      history.replaceState({screen: currentScreenState}, '', location.href);
-      overlayHistoryPushed = false;
-    }
-    ov.classList.remove('active');
-  }
   try{
-    Function(action)();
+    // أفعال الانتقال إلى شاشة كاملة: أغلق قائمة الميزات ثم انتقل للشاشة.
+    const screenMatch = String(action).match(/^switchScreen\(['"]([^'"]+)['"]\)$/);
+    if(screenMatch){
+      const ov = document.getElementById('overlay');
+      if(ov){ ov.classList.remove('active'); }
+      overlayHistoryPushed = false;
+      __alphaFeatureReturnCategory = null;
+      switchScreen(screenMatch[1]);
+      return;
+    }
+
+    // باقي الميزات تفتح داخل نفس النافذة. عند الضغط على X/الرجوع تعود إلى تصنيفها،
+    // بدلًا من الخروج إلى الصفحة الرئيسية.
+    __alphaFeatureReturnCategory = __alphaFeatureCategory;
+
+    const m = String(action).match(/^([A-Za-z_$][\w$]*)\(\)$/);
+    if(!m || typeof window[m[1]] !== 'function') throw new Error('Unknown feature: '+action);
+    window[m[1]]();
   }catch(err){
     console.error('Feature action failed:', action, err);
     showToast('تعذر فتح هذه الميزة');
@@ -6374,6 +6387,15 @@ function openOverlay(){
 function closeOverlay(){
   const ov = document.getElementById('overlay');
   if(!ov) return;
+
+  // إذا كانت ميزة مفتوحة من داخل "ميزات Alpha Glass"، ارجع أولًا إلى تصنيفها.
+  if(__alphaFeatureReturnCategory){
+    const id = __alphaFeatureReturnCategory;
+    __alphaFeatureReturnCategory = null;
+    openFeatureCategory(id);
+    return;
+  }
+
   if(overlayHistoryPushed){
     overlayHistoryPushed = false;
     history.back();
