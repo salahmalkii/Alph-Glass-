@@ -789,7 +789,7 @@ nav.no-print{display:none!important;}
       <button class="gear-btn" id="profitEyeIcon" style="font-size:16px;" onclick="toggleProfitQuickVisibility()">👁</button>
     </div>
   </div>
-  <div class="today-strip">
+  <div class="today-strip" id="todayStrip">
     <div class="today-card" id="todaySalesCard">
       <div class="lbl">مبيعات اليوم</div>
       <div class="val mono" id="todaySales">0</div>
@@ -1434,6 +1434,7 @@ function switchScreen(name){
 }
 
 function applyScreenSwitch(name){
+  renderHeaderStrip();
   document.querySelectorAll('.screen').forEach(s=>s.classList.remove('active'));
   document.getElementById('screen-'+name).classList.add('active');
   document.querySelectorAll('.nav-btn').forEach(b=>b.classList.remove('active'));
@@ -1600,16 +1601,21 @@ function renderHomeGrid(){
 }
 
 function renderHeaderStrip(){
+  const strip = document.getElementById('todayStrip');
+  // البطاقات تختفي فقط أثناء "تحضير طلبية"، وتبقى ظاهرة في باقي الصفحات.
+  if(strip) strip.style.display = orderDraftMode ? 'none' : 'flex';
   const t = todayStr();
   const todays = invoices.filter(i=>i.date.slice(0,10)===t);
   const sales = todays.reduce((a,i)=>a+i.total,0);
   const profit = todays.reduce((a,i)=>a+i.profit,0);
-  document.getElementById('todaySales').textContent = settings.hideProfit ? '•••' : plainNum(sales);
-  document.getElementById('todayProfit').textContent = settings.hideProfit ? '•••' : plainNum(profit);
+  const salesEl = document.getElementById('todaySales');
+  const profitEl = document.getElementById('todayProfit');
+  const lowEl = document.getElementById('lowStockCount');
+  if(salesEl) salesEl.textContent = settings.hideProfit ? '•••' : plainNum(sales);
+  if(profitEl) profitEl.textContent = settings.hideProfit ? '•••' : plainNum(profit);
+  if(lowEl) lowEl.textContent = products.filter(p=>p.qty <= LOW_STOCK_THRESHOLD).length;
   const eyeIcon = document.getElementById('profitEyeIcon');
   if(eyeIcon) eyeIcon.textContent = settings.hideProfit ? '🙈' : '👁';
-  const low = products.filter(p=>p.qty <= LOW_STOCK_THRESHOLD).length;
-  document.getElementById('lowStockCount').textContent = low;
 }
 
 /* ================= Inventory ================= */
