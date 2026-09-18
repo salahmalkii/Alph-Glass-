@@ -2139,17 +2139,6 @@ async function fetchPhoneDimensions(){
     if(!obj || depth>6)return null;
     if(typeof obj==='string') return parseDims(obj);
     if(Array.isArray(obj)){
-      // نمط شائع في واجهات كشط GSMArena: مصفوفة عناصر {title/name/key: "...", value/text/spec: "..."}
-      // مثل تمثيل صفوف جدول المواصفات (كل صف: عنوان الحقل + قيمته).
-      for(const x of obj){
-        if(x && typeof x==='object' && !Array.isArray(x)){
-          const label=String(x.title||x.name||x.key||x.label||'');
-          const val=x.value||x.text||x.spec||x.val;
-          if(/dimension|body\s*size/i.test(label) && val){
-            const d=parseDims(val); if(d) return d;
-          }
-        }
-      }
       for(const x of obj){const d=scan(x,depth+1);if(d)return d;}
       return null;
     }
@@ -2161,14 +2150,9 @@ async function fetchPhoneDimensions(){
         else {const d=scan(obj[k],depth+1);if(d)return d;}
       }
     }
-    // أخيرًا: افحص بقية الحقول، وادخل في أي كائن متداخل، لأن أسماء الحقول تختلف بين واجهات البرمجة.
+    // أخيرًا ابحث في جميع القيم النصية، لأن APIs مختلفة في أسماء الحقول.
     for(const [k,v] of Object.entries(obj)){
-      if(preferred.includes(k)) continue;
-      if(typeof v==='string'){
-        if(/dimension|body|size/i.test(k)){ const d=parseDims(v); if(d) return d; }
-      }else if(v && typeof v==='object'){
-        const d=scan(v,depth+1); if(d) return d;
-      }
+      if(/dimension|body/i.test(k) && typeof v==='string'){const d=parseDims(v);if(d)return d;}
     }
     return null;
   }
@@ -2185,7 +2169,7 @@ async function fetchPhoneDimensions(){
     if(!Array.isArray(list))return null;
     let best=null,bestScore=-Infinity;
     for(const x of list){
-      const n=x?.phone_name||x?.name||x?.model||x?.title||x?.device_name||x?.deviceName||'';
+      const n=x?.phone_name||x?.name||x?.model||x?.title||x?.device_name||'';
       const sc=nameScore(n);
       if(sc>bestScore){bestScore=sc;best=x;}
     }
@@ -2200,31 +2184,38 @@ async function fetchPhoneDimensions(){
   try{
     let found=local[key]||null;
 
-    // 1) GSMArena — عبر أداة كشط غير رسمية تابعة لطرف ثالث (GSMArena نفسه لا يوفّر واجهة برمجية رسمية).
-    // نجرّب أولاً نقطة الوصول الشاملة /phone?name=، وإن لم تنجح نبحث بـ/search ثم نجلب صفحة الجهاز بمعرّفه (slug).
+    // 1) API الحالية: لا نستخدم /search لأنه معروف أنه معطل في النشر الحالي؛
+    // نستخدم قائمة الشركات ثم قائمة أجهزة الشركة ثم صفحة الجهاز.
     if(!found){
-      const base='https://mobile-specs-api-sandy.vercel.app';
+      const base='https://phone-specs-api.vercel.app';
       try{
-        const pj=await getJson(base+'/phone?name='+encodeURIComponent(name));
-        found = scan(pj?.specifications) || scan(pj);
-      }catch(e){ /* ننتقل لمحاولة البحث الصريح */ }
-
-      if(!found){
-        try{
-          const sj=await getJson(base+'/search?query='+encodeURIComponent(name));
-          const results=Array.isArray(sj)?sj:(sj?.results||sj?.data||sj?.devices||[]);
-          const hit=pick(results);
-          const slugRaw=hit?.slug||hit?.id||hit?.url;
-          if(slugRaw){
-            const slug=String(slugRaw).replace(/^https?:\/\/[^/]+\//,'').replace(/^\//,'');
-            const dj=await getJson(base+'/'+slug);
-            found=scan(dj?.specifications)||scan(dj);
+        const bj=await getJson(base+'/brands');
+        const brands=bj?.data?.brands||bj?.data||bj?.brands||[];
+        const brandWords=tokens.filter(t=>['samsung','apple','xiaomi','redmi','realme','oppo','vivo','infinix','tecno','honor','oneplus','google','huawei','motorola','nokia','sony','asus','zte','lenovo','nothing'].includes(t));
+        const brand=Array.isArray(brands)?brands.find(b=>{
+          const bn=norm(b?.brand_name||b?.name||b?.title||'');
+          return brandWords.some(w=>bn===w || bn.includes(w));
+        }):null;
+        const brandUrl=brand?.detail||brand?.url||brand?.slug;
+        if(brandUrl){
+          const listUrl=String(brandUrl).startsWith('http')?brandUrl:(base+'/brands/'+String(brandUrl).replace(/^\//,''));
+          const lj=await getJson(listUrl);
+          const phones=lj?.data?.phones||lj?.data||lj?.phones||[];
+          const hit=pick(phones);
+          if(hit){
+            const d1=scan(hit);
+            if(d1)found=d1;
+            const detail=hit.detail||hit.url||hit.specs||hit.link;
+            if(!found && detail){
+              const dj=await getJson(String(detail).startsWith('http')?detail:(base+'/'+String(detail).replace(/^\//,'')));
+              found=scan(dj);
+            }
           }
-        }catch(e){ /* ننتقل للمصدر التالي */ }
-      }
+        }
+      }catch(e){ /* ننتقل للمصدر التالي */ }
     }
 
-    // 2) Wikipedia API كاحتياطي أخير. لا يحتاج مفتاحاً ويدعم origin=* من المتصفح.
+    // 2) Wikipedia API كاحتياطي. لا يحتاج مفتاحاً ويدعم origin=* من المتصفح.
     if(!found){
       try{
         const q=encodeURIComponent(name+' smartphone dimensions');
@@ -5344,7 +5335,7 @@ function openBackup(){
 function exportBackup(silent){
   const data = {
     exportedAt: new Date().toISOString(),
-    products, invoices, customers, customerTx, draftOrders, expenses, settings, suppliers, supplierTx, inventoryLog, compatGroups, compatDimensions
+    products, invoices, customers, customerTx, draftOrders, expenses, settings, suppliers, supplierTx, inventoryLog, compatGroups
   };
   const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' });
   const url = URL.createObjectURL(blob);
@@ -5375,9 +5366,8 @@ function importBackup(event){
       supplierTx = Array.isArray(data.supplierTx) ? data.supplierTx : [];
       inventoryLog = Array.isArray(data.inventoryLog) ? data.inventoryLog : [];
       compatGroups = Array.isArray(data.compatGroups) ? data.compatGroups : [];
-      compatDimensions = (data.compatDimensions && typeof data.compatDimensions === 'object' && !Array.isArray(data.compatDimensions)) ? data.compatDimensions : {};
       if(data.settings) settings = data.settings;
-      await Promise.all([saveProducts(), saveInvoices(), saveCustomers(), saveCustomerTx(), saveDraftOrders(), saveExpenses(), saveSettings(), saveSuppliers(), saveSupplierTx(), saveInventoryLog(), saveCompatGroups(), saveCompatDimensions()]);
+      await Promise.all([saveProducts(), saveInvoices(), saveCustomers(), saveCustomerTx(), saveDraftOrders(), saveExpenses(), saveSettings(), saveSuppliers(), saveSupplierTx(), saveInventoryLog(), saveCompatGroups()]);
       renderAll();
       closeOverlay();
       showToast('تم استرجاع النسخة الاحتياطية بنجاح');
@@ -6190,25 +6180,32 @@ async function saveHomeTiles(){
 function runFeatureAction(action){
   try{
     const value = String(action || '').trim();
-    // الشاشات الرئيسية: أغلق لوحة الميزات ثم انتقل للشاشة مباشرة.
     const screenMatch = value.match(/^switchScreen\(['"]([^'"]+)['"]\)$/);
     if(screenMatch){
+      const target = screenMatch[1];
       const ov = document.getElementById('overlay');
       if(ov) ov.classList.remove('active');
       overlayHistoryPushed = false;
       __alphaFeatureReturnCategory = null;
       window.__alphaFeatureMode = false;
-      switchScreen(screenMatch[1]);
+      switchScreen(target);
       return;
     }
 
-    // الميزات التي تفتح Sheet: احتفظ بالتصنيف حتى يعود زر X إليه.
-    __alphaFeatureReturnCategory = __alphaFeatureCategory;
+    // عند فتح ميزة فرعية من تصنيف، نحفظ التصنيف صراحةً حتى يكون زر X/الرجوع
+    // عائداً إلى "التحليلات والتقارير" أو التصنيف الذي جاءت منه الميزة.
+    __alphaFeatureReturnCategory = __alphaFeatureCategory || null;
     const m = value.match(/^([A-Za-z_$][\w$]*)\(\)$/);
     if(!m) throw new Error('Invalid feature action: '+value);
     const fn = window[m[1]];
     if(typeof fn !== 'function') throw new Error('Unknown feature: '+m[1]);
+
+    const ov = document.getElementById('overlay');
+    if(ov) ov.classList.add('active');
+    window.__alphaFeatureMode = true;
     fn();
+    // بعض الميزات تستدعي openOverlay()، وبعضها قد لا يفعل ذلك؛ نضمن بقاء اللوحة مفتوحة.
+    if(ov) ov.classList.add('active');
   }catch(err){
     console.error('Feature action failed:', action, err);
     showToast('تعذر فتح هذه الميزة');
@@ -6408,6 +6405,7 @@ function closeOverlay(){
   if(__alphaFeatureReturnCategory){
     const id = __alphaFeatureReturnCategory;
     __alphaFeatureReturnCategory = null;
+    window.__alphaFeatureMode = true;
     openFeatureCategory(id);
     return;
   }
@@ -6434,7 +6432,18 @@ window.addEventListener('popstate', function(e){
   overlayHistoryPushed = false;
   if(ov) ov.classList.remove('active');
 
-  if(overlayWasOpen) return; // this back press only closed the overlay
+  if(overlayWasOpen){
+    // إذا كانت نافذة ميزة مفتوحة بدون History خاص بها، لا نسمح للرجوع
+    // بإسقاط المستخدم إلى الصفحة الرئيسية؛ أعده إلى التصنيف الحالي.
+    if(window.__alphaFeatureMode && __alphaFeatureCategory){
+      const groups = window.__alphaFeatureGroups || [];
+      if(groups.some(g=>g.id===__alphaFeatureCategory)){
+        openFeatureCategory(__alphaFeatureCategory);
+        return;
+      }
+    }
+    return;
+  }
 
   const targetScreen = (e.state && e.state.screen) ? e.state.screen : 'home';
   currentScreenState = targetScreen;
