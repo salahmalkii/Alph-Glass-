@@ -1617,7 +1617,7 @@ function openAllFeaturesMenu(){
         ['الأصناف المنخفضة','inventory',"openLowStockList()"],
         ['قائمة الشراء','purchase',"openPurchaseList()"],
         ['حركة المخزون وسرعة البيع','stats',"openStockMovementAnalysis()"],
-        ['المنتجات الراكدة','stats',"openDeadProducts()"],
+        ['المنتجات الراكدة','stats',"openDeadStock()"],
         ['مساعد الشراء','purchase',"openPurchaseAssistant()"]
       ]
     },
@@ -1625,7 +1625,7 @@ function openAllFeaturesMenu(){
       id:'analytics', icon:'profits', color:'#38A8FF', title:'التحليلات والتقارير', sub:'أداء المنتجات، العملاء والمبيعات',
       items:[
         ['الإحصائيات','stats',"openMonthComparison()"],
-        ['تحليل المنتجات','stats',"openProductAnalysis()"],
+        ['تحليل المنتجات','stats',"openProductRanking()"],
         ['تحليل العملاء','customers',"openCustomerAnalysis()"],
         ['ملخص اليوم','daily',"openDailyClosing()"]
       ]
@@ -1691,7 +1691,7 @@ function openFeatureCategory(id){
     <div class="feature-subtitle">${escapeHtml(g.sub)}</div>
     <div class="ledger feature-submenu">
       ${g.items.map(([title,icon,action])=>`
-        <button class="feature-item-row" onclick="runFeatureAction(${JSON.stringify(action)})">
+        <button class="feature-item-row" onclick='runFeatureAction(${JSON.stringify(action)})'>
           <span class="feature-item-icon">${homeIconSvg(icon)}</span>
           <span>${escapeHtml(title)}</span>
           <span class="feature-category-arrow">‹</span>
