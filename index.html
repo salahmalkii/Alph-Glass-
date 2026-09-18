@@ -189,7 +189,7 @@
   .btn:disabled{opacity:.4;cursor:not-allowed;}
   .fab{
     position:fixed;
-    bottom:92px;
+    bottom:20px;
     left:18px;
     width:52px;height:52px;
     border-radius:50%;
@@ -205,7 +205,7 @@
   /* ===== Home dashboard grid ===== */
   .home-grid{
     display:grid;
-    grid-template-columns:repeat(3, 1fr);
+    grid-template-columns:repeat(2, 1fr);
     gap:12px;
   }
   .home-tile{
@@ -393,7 +393,7 @@
 
   .cart-bar{
     position:fixed;
-    bottom:92px;
+    bottom:20px;
     right:14px;left:14px;
     background:linear-gradient(135deg,#141B32,#0A0E17);
     border:1px solid var(--border-strong);
@@ -453,6 +453,7 @@
 
   /* ===== Bottom nav ===== */
   nav{
+    display:none;
     position:fixed;bottom:14px;right:14px;left:14px;
     background:rgba(19,26,44,.85);
     backdrop-filter:blur(16px);
@@ -572,6 +573,7 @@
       </div>
     </div>
     <div style="display:flex;gap:8px;">
+      <button class="gear-btn" id="headerMenuBtn" onclick="openAllFeaturesMenu()">☰</button>
       <button class="gear-btn" id="headerSearchBtn" onclick="openGlobalSearch()">🔍</button>
       <button class="gear-btn" id="headerHomeBtn" onclick="switchScreen('home')">🏠</button>
       <button class="gear-btn" onclick="openSettings()">⚙</button>
@@ -759,7 +761,7 @@
   <button class="btn btn-brass" id="cartConfirmBtn" onclick="openCheckout()">إصدار الفاتورة</button>
 </div>
 
-<div id="limitedModeBanner" class="no-print" style="display:none;position:fixed;bottom:78px;right:14px;left:14px;background:var(--alert-bg);border:1px solid var(--alert);border-radius:14px;padding:10px 14px;align-items:center;justify-content:space-between;z-index:16;">
+<div id="limitedModeBanner" class="no-print" style="display:none;position:fixed;bottom:14px;right:14px;left:14px;background:var(--alert-bg);border:1px solid var(--alert);border-radius:14px;padding:10px 14px;align-items:center;justify-content:space-between;z-index:16;">
   <div style="font-size:12.5px;color:var(--alert);font-weight:700;">🔒 وضع محدود — بيع وطلبيات فقط</div>
   <button class="btn btn-outline" style="padding:6px 12px;font-size:12px;" onclick="exitLimitedMode()">خروج</button>
 </div>
@@ -1027,6 +1029,8 @@ function enterLimitedMode(){
   document.getElementById('headerHomeBtn').style.display = 'none';
   document.getElementById('todayProfitCard').style.display = 'none';
   document.getElementById('lowStockCard').style.display = 'none';
+  const navEl = document.querySelector('nav');
+  if(navEl) navEl.style.display = 'flex';
   document.querySelectorAll('nav .nav-btn').forEach(b=>{
     const s = b.dataset.screen;
     b.style.display = (s === 'orders' || s === 'sell') ? '' : 'none';
@@ -1045,6 +1049,8 @@ function exitLimitedMode(){
   document.getElementById('todayProfitCard').style.display = '';
   document.getElementById('lowStockCard').style.display = '';
   document.querySelectorAll('nav .nav-btn').forEach(b=>{ b.style.display = ''; });
+  const navEl2 = document.querySelector('nav');
+  if(navEl2) navEl2.style.display = 'none';
   document.getElementById('appLockScreen').style.display = 'flex';
   setTimeout(()=>document.getElementById('lockPasswordInput')?.focus(), 100);
 }
@@ -1267,6 +1273,26 @@ function updateOrdersNavBadge(){
   }
 }
 
+function openAllFeaturesMenu(){
+  const sheet = document.getElementById('sheetContent');
+  sheet.innerHTML = `
+    <div class="sheet-head">
+      <h3 style="color:#9B6FDE;">كل الميزات</h3>
+      <button class="icon-btn" onclick="closeOverlay()">✕</button>
+    </div>
+    <div class="ledger">
+      ${ALL_HOME_FEATURES.map(f=>`
+        <div class="row" style="cursor:pointer;" onclick="${f.type==='screen' ? 'closeOverlay();' : ''}${f.action}">
+          <div class="row-main">
+            <div class="row-name">${f.icon} ${escapeHtml(f.title)}</div>
+          </div>
+        </div>
+      `).join('')}
+    </div>
+  `;
+  openOverlay();
+}
+
 function openLowStockList(){
   const sheet = document.getElementById('sheetContent');
   const low = products.filter(p=>p.qty <= LOW_STOCK_THRESHOLD).sort((a,b)=>a.qty-b.qty);
@@ -1292,25 +1318,26 @@ function openLowStockList(){
 }
 
 const ALL_HOME_FEATURES = [
-  { id:'sell', icon:'🧾', color:'#4a86e0', title:'بيع', action:"switchScreen('sell')" },
-  { id:'orders', icon:'📋', color:'#2fbfa8', title:'الطلبيات', action:"switchScreen('orders')" },
-  { id:'invoices', icon:'📜', color:'#e0a83a', title:'الفواتير', action:"switchScreen('invoices')" },
-  { id:'customers', icon:'👤', color:'#a15be0', title:'العملاء', action:"switchScreen('customers')" },
-  { id:'inventory', icon:'📦', color:'#2fbf8f', title:'المخزون', action:"switchScreen('inventory')" },
-  { id:'profits', icon:'📈', color:'#2fbf8f', title:'الأرباح', action:"switchScreen('profits')" },
-  { id:'dailyClosing', icon:'📊', color:'#4a86e0', title:'ملخص اليوم', action:"openDailyClosing()" },
-  { id:'expenses', icon:'💸', color:'#e05680', title:'المصاريف', action:"openExpenses()" },
-  { id:'suppliers', icon:'🏭', color:'#2fbfa8', title:'الموردين', action:"openSuppliers()" },
-  { id:'purchaseList', icon:'🛒', color:'#4a86e0', title:'قائمة الشراء', action:"openPurchaseList()" },
-  { id:'debts', icon:'⏰', color:'#e0703a', title:'ديون متأخرة', action:"openOverdueDebts()" },
-  { id:'invLog', icon:'📝', color:'#5a5a5a', title:'سجل المخزون', action:"openInventoryLog()" },
-  { id:'compatGroups', icon:'🧩', color:'#e0a83a', title:'مجموعات التوافق', action:"openCompatGroups()" },
-  { id:'productCatalog', icon:'📤', color:'#a15be0', title:'قائمة المنتجات', action:"openProductCatalog()" },
-  { id:'loginLog', icon:'🔑', color:'#5a5a5a', title:'سجل الدخول', action:"openLoginLog()" },
-  { id:'statistics', icon:'📆', color:'#4a86e0', title:'الإحصائيات', action:"openMonthComparison()" },
-  { id:'labelPrint', icon:'🏷', color:'#e05680', title:'طباعة ملصق', action:"openLabelPrint()" },
-  { id:'soldReport', icon:'📦', color:'#2fbf8f', title:'المبيعات حسب الصنف', action:"openDailySoldReport()" },
-  { id:'backup', icon:'💾', color:'#2fbf8f', title:'نسخة احتياطية', action:"openBackup()" },
+  { id:'sell', icon:'🧾', color:'#4a86e0', title:'بيع', action:"switchScreen('sell')", type:'screen' },
+  { id:'prepareOrder', icon:'📝', color:'#e0703a', title:'تحضير طلبية', action:"startDraftOrderFlow()", type:'screen' },
+  { id:'orders', icon:'📋', color:'#2fbfa8', title:'الطلبيات', action:"switchScreen('orders')", type:'screen' },
+  { id:'invoices', icon:'📜', color:'#e0a83a', title:'الفواتير', action:"switchScreen('invoices')", type:'screen' },
+  { id:'customers', icon:'👤', color:'#a15be0', title:'العملاء', action:"switchScreen('customers')", type:'screen' },
+  { id:'inventory', icon:'📦', color:'#2fbf8f', title:'المخزون', action:"switchScreen('inventory')", type:'screen' },
+  { id:'profits', icon:'📈', color:'#2fbf8f', title:'الأرباح', action:"switchScreen('profits')", type:'screen' },
+  { id:'dailyClosing', icon:'📊', color:'#4a86e0', title:'ملخص اليوم', action:"openDailyClosing()", type:'sheet' },
+  { id:'expenses', icon:'💸', color:'#e05680', title:'المصاريف', action:"openExpenses()", type:'sheet' },
+  { id:'suppliers', icon:'🏭', color:'#2fbfa8', title:'الموردين', action:"openSuppliers()", type:'sheet' },
+  { id:'purchaseList', icon:'🛒', color:'#4a86e0', title:'قائمة الشراء', action:"openPurchaseList()", type:'sheet' },
+  { id:'debts', icon:'⏰', color:'#e0703a', title:'ديون متأخرة', action:"openOverdueDebts()", type:'sheet' },
+  { id:'invLog', icon:'📝', color:'#5a5a5a', title:'سجل المخزون', action:"openInventoryLog()", type:'sheet' },
+  { id:'compatGroups', icon:'🧩', color:'#e0a83a', title:'مجموعات التوافق', action:"openCompatGroups()", type:'sheet' },
+  { id:'productCatalog', icon:'📤', color:'#a15be0', title:'قائمة المنتجات', action:"openProductCatalog()", type:'sheet' },
+  { id:'loginLog', icon:'🔑', color:'#5a5a5a', title:'سجل الدخول', action:"openLoginLog()", type:'sheet' },
+  { id:'statistics', icon:'📆', color:'#4a86e0', title:'الإحصائيات', action:"openMonthComparison()", type:'sheet' },
+  { id:'labelPrint', icon:'🏷', color:'#e05680', title:'طباعة ملصق', action:"openLabelPrint()", type:'sheet' },
+  { id:'soldReport', icon:'📦', color:'#2fbf8f', title:'المبيعات حسب الصنف', action:"openDailySoldReport()", type:'sheet' },
+  { id:'backup', icon:'💾', color:'#2fbf8f', title:'نسخة احتياطية', action:"openBackup()", type:'sheet' },
 ];
 
 function homeHexToRgba(hex, alpha){
