@@ -743,6 +743,22 @@ nav.no-print{display:none!important;}
 .all-features-icon{width:28px;height:28px;display:inline-flex;align-items:center;justify-content:center;flex:0 0 28px;}
 .all-features-icon .home-modern-icon{width:24px;height:24px;display:block;}
 </style>
+<style>
+.stats-date-picker{margin:0 0 12px;padding:12px 14px;border:1px solid rgba(56,189,248,.18);border-radius:16px;background:rgba(56,189,248,.05);}
+.stats-date-picker label{display:block;font-weight:700;margin-bottom:8px;}
+.stats-date-picker input[type=date]{padding:11px 12px;border:1px solid rgba(148,163,184,.2);border-radius:12px;background:#0D141E;color:var(--text);font-family:'Cairo',sans-serif;}
+.stats-filters{display:grid;grid-template-columns:1fr 1fr 1fr;gap:8px;margin-bottom:12px}
+.stats-filters select{min-width:0;padding:10px 11px;font-family:'Cairo',sans-serif}
+.stats-kpis{display:grid;grid-template-columns:repeat(2,1fr);gap:8px;margin-bottom:12px}
+.stats-kpi{padding:12px;border:1px solid rgba(148,163,184,.16);border-radius:16px;background:linear-gradient(145deg,rgba(255,255,255,.055),rgba(255,255,255,.018));box-shadow:0 8px 24px rgba(0,0,0,.12)}
+.stats-kpi span{display:block;color:var(--muted);font-size:11px;margin-bottom:4px}.stats-kpi b{display:block;font-size:18px;line-height:1.4}.stats-kpi small{display:block;color:var(--muted);font-size:9px;margin-top:3px}
+.stats-panel{border:1px solid rgba(148,163,184,.15);border-radius:18px;background:rgba(255,255,255,.025);padding:12px;margin-bottom:10px;overflow:hidden}
+.stats-panel-head{display:flex;align-items:center;justify-content:space-between;gap:8px;margin-bottom:8px}.stats-panel-head strong{font-size:13px}.stats-panel-head span{font-size:9px;color:var(--muted)}
+.stats-chart-wrap{position:relative;width:100%;height:245px}.stats-chart-wrap canvas{display:block;width:100%;height:245px}.stats-chart-tip{display:none;position:absolute;z-index:2;pointer-events:none;padding:6px 9px;border-radius:10px;background:#101923;color:#fff;border:1px solid rgba(56,189,248,.4);font-size:10px;white-space:nowrap;box-shadow:0 8px 24px rgba(0,0,0,.3)}
+.stats-two-col{display:grid;grid-template-columns:1fr 1fr;gap:10px}.stats-two-col .stats-panel{margin-bottom:0}
+.stats-list-row{display:flex;align-items:center;gap:8px;padding:9px 0;border-bottom:1px solid rgba(148,163,184,.10)}.stats-list-row:last-child{border-bottom:0}.stats-list-row em{font-style:normal;width:22px;height:22px;border-radius:8px;display:flex;align-items:center;justify-content:center;background:rgba(56,189,248,.10);font-size:10px}.stats-list-row div{min-width:0;flex:1}.stats-list-row b{display:block;font-size:11px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}.stats-list-row small{display:block;color:var(--muted);font-size:9px;margin-top:2px}.stats-list-row>strong{font-size:10px;white-space:nowrap}.stock-dot{width:9px;height:9px;border-radius:50%;background:#f59e0b;box-shadow:0 0 8px rgba(245,158,11,.45);flex:0 0 9px}.stock-dot.zero{background:#ef4444;box-shadow:0 0 8px rgba(239,68,68,.45)}
+@media(max-width:520px){.stats-filters{grid-template-columns:1fr 1fr}.stats-filters select:last-child{grid-column:1/-1}.stats-two-col{grid-template-columns:1fr}.stats-chart-wrap,.stats-chart-wrap canvas{height:225px}}
+</style>
 </head>
 <body>
 
@@ -4758,6 +4774,16 @@ function openOverdueDebts(){
 
 /* ================= Month-over-Month Comparison ================= */
 let statsPeriod = 'month';
+let statsSelectedDate = todayStr();
+
+function statsLocalDate(ymd){
+  const m=String(ymd||'').match(/^(\d{4})-(\d{2})-(\d{2})$/);
+  return m ? new Date(Number(m[1]), Number(m[2])-1, Number(m[3])) : new Date();
+}
+function statsDateValue(d){
+  const y=d.getFullYear(), m=String(d.getMonth()+1).padStart(2,'0'), day=String(d.getDate()).padStart(2,'0');
+  return `${y}-${m}-${day}`;
+}
 
 function getPeriodRanges(period){
   const now = new Date();
@@ -4765,7 +4791,14 @@ function getPeriodRanges(period){
   const endOfToday = new Date(startOfToday.getTime() + 24*60*60*1000);
   let curStart, curEnd, prevStart, prevEnd, curLabel, prevLabel;
 
-  if(period === 'day'){
+  if(period === 'selectedDay'){
+    curStart = statsLocalDate(statsSelectedDate || todayStr());
+    curEnd = new Date(curStart.getTime() + 24*60*60*1000);
+    prevStart = new Date(curStart.getTime() - 24*60*60*1000); prevEnd = curStart;
+    const labelDate = curStart.toLocaleDateString('ar-DZ',{weekday:'long',year:'numeric',month:'long',day:'numeric'});
+    const prevDate = prevStart.toLocaleDateString('ar-DZ',{year:'numeric',month:'long',day:'numeric'});
+    curLabel = labelDate; prevLabel = prevDate;
+  }else if(period === 'day'){
     curStart = startOfToday; curEnd = endOfToday;
     prevStart = new Date(curStart.getTime() - 24*60*60*1000); prevEnd = curStart;
     curLabel = 'اليوم'; prevLabel = 'الأمس';
@@ -4826,48 +4859,169 @@ function statRow(label, curVal, prevVal, isMoney, hideIfProfit){
     </div>`;
 }
 
-function openMonthComparison(period){
+function statsEscape(v){
+  return escapeHtml(String(v ?? ''));
+}
+
+function getStatsFilteredInvoices(period, category, customerId){
+  const {curStart, curEnd} = getPeriodRanges(period);
+  return invoices.filter(i=>{
+    const d = new Date(i.date);
+    if(d < curStart || d >= curEnd) return false;
+    if(customerId && i.customerId !== customerId) return false;
+    if(category && category !== 'all'){
+      const hasCat = (i.items||[]).some(it=>{
+        const p = products.find(x=>x.id===it.productId);
+        return (p?.category || p?.cat || 'other') === category;
+      });
+      if(!hasCat) return false;
+    }
+    return true;
+  });
+}
+
+function statsBuildSeries(period, category, customerId, metric){
+  const {curStart, curEnd} = getPeriodRanges(period);
+  const span = curEnd - curStart;
+  let count, step;
+  if(period==='day' || period==='selectedDay'){ count=24; step=60*60*1000; }
+  else if(period==='week'){ count=7; step=24*60*60*1000; }
+  else { count=Math.max(1,new Date(curStart.getFullYear(),curStart.getMonth()+1,0).getDate()); step=24*60*60*1000; }
+  const labels=[], values=[];
+  for(let n=0;n<count;n++){
+    const a=new Date(curStart.getTime()+n*step);
+    const b=new Date(Math.min(curEnd.getTime(), a.getTime()+step));
+    const inv=invoices.filter(i=>{
+      const d=new Date(i.date);
+      if(d<a || d>=b) return false;
+      if(customerId && i.customerId!==customerId) return false;
+      if(category && category!=='all'){
+        const ok=(i.items||[]).some(it=>{
+          const p=products.find(x=>x.id===it.productId);
+          return (p?.category || p?.cat || 'other')===category;
+        });
+        if(!ok) return false;
+      }
+      return true;
+    });
+    let val=0;
+    if(metric==='invoices') val=inv.length;
+    else if(metric==='profit') val=inv.reduce((x,i)=>x+(i.profit||0),0);
+    else val=inv.reduce((x,i)=>x+(i.total||0),0);
+    labels.push(period==='day' ? String(a.getHours()).padStart(2,'0')+':00' : String(a.getDate()).padStart(2,'0')+'/'+String(a.getMonth()+1).padStart(2,'0'));
+    values.push(val);
+  }
+  return {labels,values};
+}
+
+function statsDrawChart(){
+  const canvas=document.getElementById('statsChart');
+  if(!canvas) return;
+  const metric=document.getElementById('statsMetric')?.value || 'sales';
+  const category=document.getElementById('statsCategory')?.value || 'all';
+  const customerId=document.getElementById('statsCustomer')?.value || '';
+  const series=statsBuildSeries(statsPeriod,category,customerId,metric);
+  const dpr=window.devicePixelRatio||1;
+  const rect=canvas.getBoundingClientRect();
+  const w=Math.max(320,rect.width), h=Math.max(230,rect.height);
+  canvas.width=w*dpr; canvas.height=h*dpr;
+  const ctx=canvas.getContext('2d'); ctx.setTransform(dpr,0,0,dpr,0,0);
+  ctx.clearRect(0,0,w,h);
+  const css=getComputedStyle(document.body);
+  const text=css.getPropertyValue('--text')||'#fff', muted=css.getPropertyValue('--muted')||'#999';
+  const accent='#38BDF8';
+  const left=42,right=14,top=18,bottom=34;
+  const pw=w-left-right, ph=h-top-bottom;
+  const max=Math.max(1,...series.values);
+  ctx.font='11px Cairo, sans-serif'; ctx.textAlign='right'; ctx.fillStyle=muted;
+  for(let g=0;g<4;g++){
+    const y=top+ph*g/3;
+    ctx.strokeStyle='rgba(148,163,184,.13)'; ctx.lineWidth=1;
+    ctx.beginPath();ctx.moveTo(left,y);ctx.lineTo(w-right,y);ctx.stroke();
+    const val=max*(1-g/3);
+    ctx.fillText(metric==='invoices'?Math.round(val):plainNum(val),left-7,y+4);
+  }
+  const pts=series.values.map((v,i)=>({x:left+(series.values.length===1?pw/2:pw*i/(series.values.length-1)),y:top+ph-(v/max)*ph}));
+  const grad=ctx.createLinearGradient(0,top,0,h); grad.addColorStop(0,'rgba(56,189,248,.28)'); grad.addColorStop(1,'rgba(56,189,248,0)');
+  ctx.beginPath(); pts.forEach((p,i)=>i?ctx.lineTo(p.x,p.y):ctx.moveTo(p.x,p.y)); ctx.lineTo(pts.at(-1).x,top+ph);ctx.lineTo(pts[0].x,top+ph);ctx.closePath();ctx.fillStyle=grad;ctx.fill();
+  ctx.beginPath(); pts.forEach((p,i)=>i?ctx.lineTo(p.x,p.y):ctx.moveTo(p.x,p.y)); ctx.strokeStyle=accent;ctx.lineWidth=3;ctx.lineJoin='round';ctx.stroke();
+  ctx.fillStyle=accent; pts.forEach(p=>{ctx.beginPath();ctx.arc(p.x,p.y,3.5,0,Math.PI*2);ctx.fill();});
+  ctx.fillStyle=muted;ctx.textAlign='center';
+  const every=Math.max(1,Math.ceil(series.labels.length/7));
+  series.labels.forEach((lab,i)=>{if(i%every===0||i===series.labels.length-1)ctx.fillText(lab,pts[i].x,h-10);});
+  canvas._statsPoints=pts; canvas._statsSeries=series; canvas._statsMetric=metric;
+}
+
+function statsChartMove(ev){
+  const canvas=document.getElementById('statsChart'), tip=document.getElementById('statsChartTip'); if(!canvas||!tip||!canvas._statsPoints)return;
+  const r=canvas.getBoundingClientRect(), x=(ev.touches?ev.touches[0].clientX:ev.clientX)-r.left;
+  let best=0,dist=Infinity; canvas._statsPoints.forEach((p,i)=>{const q=Math.abs(p.x-x);if(q<dist){dist=q;best=i;}});
+  if(dist>30){tip.style.display='none';return;}
+  const val=canvas._statsSeries.values[best]; const lab=canvas._statsSeries.labels[best];
+  tip.textContent=lab+' • '+(canvas._statsMetric==='invoices'?val+' فاتورة':plainNum(val)+' '+settings.currency);
+  tip.style.display='block'; tip.style.left=Math.min(Math.max(8,x-70),r.width-150)+'px'; tip.style.top=Math.max(4,canvas._statsPoints[best].y-42)+'px';
+}
+
+function openMonthComparison(period, selectedDate){
+  if(period === 'selectedDay') statsSelectedDate = selectedDate || statsSelectedDate || todayStr();
   statsPeriod = period || statsPeriod || 'month';
-  const sheet = document.getElementById('sheetContent');
-  const { curStart, curEnd, prevStart, prevEnd, curLabel, prevLabel } = getPeriodRanges(statsPeriod);
-  const cur = computePeriodStats(curStart, curEnd);
-  const prev = computePeriodStats(prevStart, prevEnd);
-
-  sheet.innerHTML = `
-    <div class="sheet-head">
-      <h3>الإحصائيات</h3>
-      <button class="icon-btn" onclick="closeOverlay()">✕</button>
-    </div>
-    <div class="chip-row" style="margin-bottom:14px;">
+  const sheet=document.getElementById('sheetContent');
+  const {curStart,curEnd,prevStart,prevEnd,curLabel,prevLabel}=getPeriodRanges(statsPeriod);
+  const cur=computePeriodStats(curStart,curEnd), prev=computePeriodStats(prevStart,prevEnd);
+  const cats=[['all','كل الفئات'],['glass','زجاج حماية'],['acc','إكسسوارات'],['other','أخرى']];
+  const customerOptions=customers.map(c=>`<option value="${statsEscape(c.id)}">${statsEscape(c.name)}</option>`).join('');
+  const topProducts={};
+  getStatsFilteredInvoices(statsPeriod,'all','').forEach(inv=>(inv.items||[]).forEach(it=>{
+    const key=it.productId||it.name; if(!topProducts[key])topProducts[key]={name:it.name,qty:0,sales:0,profit:0};
+    topProducts[key].qty+=it.qty||0; topProducts[key].sales+=(it.qty||0)*(it.sellPrice||0); topProducts[key].profit+=(it.qty||0)*((it.sellPrice||0)-(it.buyPrice||0));
+  }));
+  const top=Object.values(topProducts).sort((a,b)=>b.qty-a.qty).slice(0,5);
+  const low=products.filter(p=>(p.qty||0)<=LOW_STOCK_THRESHOLD).sort((a,b)=>(a.qty||0)-(b.qty||0)).slice(0,5);
+  const customerAgg={};
+  getStatsFilteredInvoices(statsPeriod,'all','').forEach(inv=>{if(inv.customerId){if(!customerAgg[inv.customerId])customerAgg[inv.customerId]={sales:0,count:0};customerAgg[inv.customerId].sales+=inv.total||0;customerAgg[inv.customerId].count++;}});
+  const topCustomers=Object.entries(customerAgg).map(([id,v])=>({c:customers.find(x=>x.id===id),...v})).filter(x=>x.c).sort((a,b)=>b.sales-a.sales).slice(0,5);
+  const hide=settings.hideProfit;
+  sheet.innerHTML=`
+    <div class="sheet-head"><h3>لوحة الإحصائيات</h3><button class="icon-btn" onclick="closeOverlay()">✕</button></div>
+    <div class="chip-row" style="margin-bottom:12px;">
       <button class="chip ${statsPeriod==='day'?'active':''}" onclick="openMonthComparison('day')">اليوم</button>
-      <button class="chip ${statsPeriod==='week'?'active':''}" onclick="openMonthComparison('week')">الأسبوع</button>
-      <button class="chip ${statsPeriod==='month'?'active':''}" onclick="openMonthComparison('month')">الشهر</button>
+      <button class="chip ${statsPeriod==='week'?'active':''}" onclick="openMonthComparison('week')">7 أيام</button>
+      <button class="chip ${statsPeriod==='month'?'active':''}" onclick="openMonthComparison('month')">هذا الشهر</button>
     </div>
-    <div class="row-sub" style="margin-bottom:14px;">${curLabel} مقابل ${prevLabel}</div>
-
-    <div class="ledger" style="margin-bottom:14px;">
-      ${statRow('عدد الفواتير', cur.count, prev.count, false, false)}
-      ${statRow('إجمالي المبيعات', cur.sales, prev.sales, true, false)}
-      ${statRow('التكلفة', cur.cost, prev.cost, true, true)}
-      ${statRow('الربح', cur.profit, prev.profit, true, true)}
-      ${statRow('المصاريف', cur.expensesTotal, prev.expensesTotal, true, false)}
-      ${statRow('الربح بعد المصاريف', cur.netProfit, prev.netProfit, true, true)}
-      ${statRow('متوسط الفاتورة', Math.round(cur.avgSale), Math.round(prev.avgSale), true, false)}
-    </div>
-
-    <div class="section-title"><span>نقد ودين — ${curLabel}</span></div>
-    <div class="stat-grid">
-      <div class="stat-card">
-        <div class="v mono" style="color:var(--accent-b);">${plainNum(cur.cashCollected)}</div>
-        <div class="l">نقد محصّل</div>
+    <div class="stats-date-picker">
+      <label>📅 اختر اليوم الذي تريد إحصائياته</label>
+      <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;">
+        <input type="date" id="statsSelectedDate" value="${statsEscape(statsSelectedDate || todayStr())}" onchange="openMonthComparison('selectedDay',this.value)" style="flex:1;min-width:180px;">
+        <button class="chip ${statsPeriod==='selectedDay'?'active':''}" onclick="openMonthComparison('selectedDay',document.getElementById('statsSelectedDate')?.value || todayStr())">عرض اليوم</button>
       </div>
-      <div class="stat-card">
-        <div class="v mono" style="color:var(--alert);">${plainNum(cur.newDebt)}</div>
-        <div class="l">دين جديد</div>
-      </div>
+      <div class="row-sub" style="margin-top:6px;">يمكنك اختيار أي تاريخ محفوظ في بيانات المبيعات والمصاريف، وستظهر المقارنة مع اليوم السابق.</div>
     </div>
+    <div class="stats-filters">
+      <select id="statsMetric" onchange="statsDrawChart()"><option value="sales">المبيعات</option><option value="profit">الربح</option><option value="invoices">عدد الفواتير</option></select>
+      <select id="statsCategory" onchange="statsDrawChart()">${cats.map(([v,l])=>`<option value="${v}">${l}</option>`).join('')}</select>
+      <select id="statsCustomer" onchange="statsDrawChart()"><option value="">كل العملاء</option>${customerOptions}</select>
+    </div>
+    <div class="stats-kpis">
+      <div class="stats-kpi"><span>المبيعات</span><b>${plainNum(cur.sales)}</b><small>${pctChange(cur.sales,prev.sales)>=0?'+':''}${pctChange(cur.sales,prev.sales)}% عن السابق</small></div>
+      <div class="stats-kpi"><span>الفواتير</span><b>${cur.count}</b><small>${pctChange(cur.count,prev.count)>=0?'+':''}${pctChange(cur.count,prev.count)}%</small></div>
+      <div class="stats-kpi"><span>متوسط الفاتورة</span><b>${plainNum(cur.avgSale)}</b><small>${curLabel}</small></div>
+      <div class="stats-kpi"><span>النقد المحصّل</span><b>${plainNum(cur.cashCollected)}</b><small>دين جديد: ${plainNum(cur.newDebt)}</small></div>
+      <div class="stats-kpi"><span>المصاريف</span><b>${plainNum(cur.expensesTotal)}</b><small>صافي النقد: ${plainNum(cur.cashCollected-cur.expensesTotal)}</small></div>
+      <div class="stats-kpi"><span>الربح الصافي</span><b>${hide?'•••':plainNum(cur.netProfit)}</b><small>${hide?'مخفي':`الهامش ${cur.sales?Math.round(cur.netProfit/cur.sales*100):0}%`}</small></div>
+    </div>
+    <div class="stats-panel"><div class="stats-panel-head"><strong>اتجاه ${statsEscape(curLabel)}</strong><span>تفاعل: مرّر المؤشر على الرسم</span></div><div class="stats-chart-wrap"><canvas id="statsChart"></canvas><div id="statsChartTip" class="stats-chart-tip"></div></div></div>
+    <div class="stats-two-col">
+      <div class="stats-panel"><div class="stats-panel-head"><strong>🔥 الأكثر مبيعًا</strong></div>${top.length?top.map((x,i)=>`<div class="stats-list-row"><em>${i+1}</em><div><b>${statsEscape(x.name)}</b><small>${x.qty} قطعة • ${plainNum(x.sales)}</small></div><strong>${hide?'•••':plainNum(x.profit)}</strong></div>`).join(''):`<div class="empty">لا توجد مبيعات في الفترة</div>`}</div>
+      <div class="stats-panel"><div class="stats-panel-head"><strong>📦 المخزون</strong></div>${low.length?low.map(x=>`<div class="stats-list-row"><span class="stock-dot ${x.qty<=0?'zero':''}"></span><div><b>${statsEscape(x.name)}</b><small>${x.qty<=0?'نفد المخزون':'كمية منخفضة'}</small></div><strong>${x.qty}</strong></div>`).join(''):`<div class="empty">المخزون جيد</div>`}</div>
+    </div>
+    <div class="stats-panel"><div class="stats-panel-head"><strong>👥 أهم العملاء</strong><span>حسب قيمة المبيعات</span></div>${topCustomers.length?topCustomers.map((x,i)=>`<div class="stats-list-row"><em>${i+1}</em><div><b>${statsEscape(x.c.name)}</b><small>${x.count} فاتورة</small></div><strong>${plainNum(x.sales)}</strong></div>`).join(''):`<div class="empty">لا توجد مبيعات مرتبطة بعملاء</div>`}</div>
+    <div class="row-sub" style="margin-top:10px;">${curLabel} مقابل ${prevLabel} • التكلفة ${hide?'•••':plainNum(cur.cost)} • الربح ${hide?'•••':plainNum(cur.profit)}</div>
   `;
   openOverlay();
+  setTimeout(()=>{
+    statsDrawChart();
+    const c=document.getElementById('statsChart'); if(c){c.addEventListener('mousemove',statsChartMove);c.addEventListener('mouseleave',()=>{const t=document.getElementById('statsChartTip');if(t)t.style.display='none';});c.addEventListener('touchmove',statsChartMove,{passive:true});}
+  },30);
 }
 
 function openDailyClosing(){
