@@ -1033,6 +1033,7 @@ let supplierTx = [];
 let editingSupplierId = null;
 let inventoryLog = [];
 let compatGroups = [];
+let compatDimensions = {}; // model -> {length,width}
 let editingGroupId = null;
 let loginLog = [];
 
@@ -1130,6 +1131,10 @@ async function loadAll(){
     const cg = localStorage.getItem(STORAGE_PREFIX + 'compatGroups');
     compatGroups = cg ? JSON.parse(cg) : [];
   }catch(e){ compatGroups = []; }
+  try{
+    const cd = localStorage.getItem(STORAGE_PREFIX + 'compatDimensions');
+    compatDimensions = cd ? JSON.parse(cd) : {};
+  }catch(e){ compatDimensions = {}; }
   try{
     const ll = localStorage.getItem(STORAGE_PREFIX + 'loginLog');
     loginLog = ll ? JSON.parse(ll) : [];
@@ -1847,6 +1852,14 @@ function openProductSheet(id){
       <label>الكمية المتوفرة</label>
       <input type="number" inputmode="numeric" step="10" id="f-qty" value="${p ? p.qty : ''}" placeholder="0" oninput="recalcProductSummary()">
     </div>
+    <div class="field" style="margin-top:4px;">
+      <label>أبعاد الموديل — لاستخدام البحث الذكي (اختياري)</label>
+      <div class="two-col">
+        <input type="number" step="0.1" id="f-dim-length" value="${p && p.dimLength ? p.dimLength : ''}" placeholder="الطول mm">
+        <input type="number" step="0.1" id="f-dim-width" value="${p && p.dimWidth ? p.dimWidth : ''}" placeholder="العرض mm">
+      </div>
+      <div class="row-sub">مثال: 171.9 × 77.8 mm. هذه الأبعاد تستخدم فقط لاقتراح البدائل.</div>
+    </div>
     <div class="stat-grid" style="margin-bottom:14px;">
       <div class="stat-card">
         <div class="v mono" id="fSummaryCost">0</div>
@@ -1899,6 +1912,10 @@ async function saveProductForm(){
   const brand = document.getElementById('f-brand').value.trim() || null;
   const glassType = (category === 'glass' || category === 'زجاج حماية') ? (document.getElementById('f-glasstype').value.trim() || null) : null;
   const isNew = document.getElementById('f-isnew').checked;
+  const dimLength = parseFloat(document.getElementById('f-dim-length')?.value);
+  const dimWidth = parseFloat(document.getElementById('f-dim-width')?.value);
+  const safeDimLength = (!isNaN(dimLength) && dimLength > 0) ? dimLength : null;
+  const safeDimWidth = (!isNaN(dimWidth) && dimWidth > 0) ? dimWidth : null;
 
   if(!name){ showToast('أدخل اسم الصنف'); return; }
   if(isNaN(buy) || isNaN(sell) || isNaN(qty) || buy<0 || sell<0 || qty<0){
@@ -1912,12 +1929,12 @@ async function saveProductForm(){
     if(p.buyPrice !== buy) logOps.push({ field: 'سعر الشراء', oldValue: p.buyPrice, newValue: buy });
     if(p.sellPrice !== sell) logOps.push({ field: 'سعر البيع', oldValue: p.sellPrice, newValue: sell });
     if(p.qty !== qty) logOps.push({ field: 'الكمية', oldValue: p.qty, newValue: qty });
-    p.name = name; p.buyPrice = buy; p.sellPrice = sell; p.qty = qty; p.category = category; p.compatGroupId = compatGroupId; p.brand = brand; p.glassType = glassType; p.isNew = isNew;
+    p.name = name; p.buyPrice = buy; p.sellPrice = sell; p.qty = qty; p.category = category; p.compatGroupId = compatGroupId; p.brand = brand; p.glassType = glassType; p.isNew = isNew; p.dimLength = safeDimLength; p.dimWidth = safeDimWidth;
     logOps.forEach(op=>{
       inventoryLog.unshift({ id: uid(), productId: p.id, productName: name, field: op.field, oldValue: op.oldValue, newValue: op.newValue, date: new Date().toISOString() });
     });
   }else{
-    products.push({ id: uid(), name, buyPrice: buy, sellPrice: sell, qty, category, compatGroupId, brand, glassType, isNew });
+    products.push({ id: uid(), name, buyPrice: buy, sellPrice: sell, qty, category, compatGroupId, brand, glassType, isNew, dimLength: safeDimLength, dimWidth: safeDimWidth });
   }
   await saveProducts();
   if(logOps.length > 0) await saveInventoryLog();
@@ -2246,6 +2263,20 @@ function renderPos(){
     filtered = [...filtered, ...groupMatches];
   }
 
+  // إذا لم يوجد المنتج المطلوب، اقترح تلقائياً المنتجات المتوفرة ذات الأبعاد القريبة.
+  let posSmartMatchInfo = {};
+  if(q && filtered.length === 0){
+    const target = getModelDimensions(q);
+    if(target){
+      const tol = 1;
+      const smart = byFilter.map(p=>({p,d:dimensionDistance(target,getModelDimensions(p.name))}))
+        .filter(x=>x.p.qty>0 && x.d && x.d.dl<=tol && x.d.dw<=tol)
+        .sort((a,b)=>a.d.score-b.d.score).slice(0,10);
+      smart.forEach(x=>posSmartMatchInfo[x.p.id]=x.d);
+      filtered = smart.map(x=>x.p);
+    }
+  }
+
   const posChipsEl = document.getElementById('posChips');
   if(posChipsEl){
     const cats = [...new Set(products.map(p=>categoryLabel(p)))].sort();
@@ -2276,7 +2307,8 @@ function renderPos(){
     const grp = p.compatGroupId ? compatGroups.find(g=>g.id===p.compatGroupId) : null;
     const displayName = cartDisplayName[p.id];
     const matchedTerm = posCompatMatchInfo[p.id];
-    const matchedTermArg = matchedTerm ? `'${escapeHtml(matchedTerm).replace(/'/g,"\\'")}'` : 'null';
+    const smartMatched = posSmartMatchInfo[p.id];
+    const matchedTermArg = matchedTerm ? `'${escapeHtml(matchedTerm).replace(/'/g,"\\'")}'` : (smartMatched ? `'${escapeHtml(q).replace(/'/g,"\\'")}'` : 'null');
     return `
     <div class="pos-item">
       <div class="row-main" ${orderDraftMode ? `style="cursor:pointer;" onclick="quickAddAndClearSearch('${p.id}', ${matchedTermArg})"` : ''}>
@@ -4079,6 +4111,173 @@ function openInventoryLog(){
   openOverlay();
 }
 
+/* ================= Smart dimension compatibility ================= */
+async function saveCompatDimensions(){
+  try{ localStorage.setItem(STORAGE_PREFIX + 'compatDimensions', JSON.stringify(compatDimensions)); }
+  catch(e){ showToast('تعذر حفظ أبعاد التوافق'); }
+}
+
+function normalizeDimModel(s){
+  return normalizeModelStr(s || '');
+}
+
+function getModelDimensions(model){
+  const key = normalizeDimModel(model);
+  if(!key) return null;
+  const d = compatDimensions[key];
+  if(d && Number(d.length) > 0 && Number(d.width) > 0) return {length:Number(d.length), width:Number(d.width)};
+  const p = products.find(x => normalizeDimModel(x.name) === key || normalizeDimModel(x.model) === key);
+  if(p && Number(p.dimLength) > 0 && Number(p.dimWidth) > 0) return {length:Number(p.dimLength), width:Number(p.dimWidth)};
+  return null;
+}
+
+function dimensionDistance(a,b){
+  if(!a || !b) return null;
+  const dl = Math.abs(Number(a.length)-Number(b.length));
+  const dw = Math.abs(Number(a.width)-Number(b.width));
+  // العرض أهم قليلاً من الطول في ملاءمة الزجاج، مع إبقاء القياس واضحاً بالأرقام.
+  const score = (dl * 0.45) + (dw * 0.55);
+  return {dl,dw,score};
+}
+
+function dimensionGrade(d){
+  if(!d) return {label:'بدون أبعاد', cls:''};
+  const max = Math.max(d.dl,d.dw);
+  if(max <= 0.5) return {label:'مطابق قريب جداً', cls:'glass'};
+  if(max <= 1) return {label:'متوافق محتمل', cls:'other'};
+  if(max <= 1.5) return {label:'فرق بسيط', cls:'other'};
+  return {label:'بعيد', cls:'alert'};
+}
+
+function openSmartCompat(){
+  const sheet = document.getElementById('sheetContent');
+  sheet.innerHTML = `
+    <div class="sheet-head">
+      <h3>🔎 اقتراح بديل حسب الأبعاد</h3>
+      <button class="icon-btn" onclick="openCompatGroups()">✕</button>
+    </div>
+    <div class="row-sub" style="margin-bottom:14px;">اكتب الموديل الذي يبحث عنه الزبون. إذا كانت أبعاده محفوظة سيستخدمها التطبيق تلقائياً، وإلا أدخل الطول والعرض يدوياً.</div>
+    <div class="field">
+      <label>الموديل المطلوب</label>
+      <input type="text" id="smartModel" placeholder="مثال: Realme C85" oninput="autoFillSmartDimensions()">
+    </div>
+    <div class="two-col">
+      <div class="field">
+        <label>الطول (mm)</label>
+        <input type="number" step="0.1" id="smartLength" placeholder="171.9">
+      </div>
+      <div class="field">
+        <label>العرض (mm)</label>
+        <input type="number" step="0.1" id="smartWidth" placeholder="77.8">
+      </div>
+    </div>
+    <div class="field">
+      <label>أقصى فرق مسموح</label>
+      <select id="smartTolerance">
+        <option value="0.5">0.5 مم</option>
+        <option value="1" selected>1 مم</option>
+        <option value="1.5">1.5 مم</option>
+        <option value="2">2 مم</option>
+        <option value="3">3 مم</option>
+      </select>
+    </div>
+    <button class="btn btn-brass btn-block" onclick="findSmartCompat()">🔍 ابحث عن البدائل الموجودة في المخزون</button>
+    <div id="smartCompatResults" style="margin-top:14px;"></div>
+  `;
+  openOverlay();
+  setTimeout(()=>document.getElementById('smartModel')?.focus(),100);
+}
+
+function autoFillSmartDimensions(){
+  const model = (document.getElementById('smartModel')?.value || '').trim();
+  const d = getModelDimensions(model);
+  if(!d) return;
+  const l=document.getElementById('smartLength'), w=document.getElementById('smartWidth');
+  if(l && !l.value) l.value=d.length;
+  if(w && !w.value) w.value=d.width;
+}
+
+function findSmartCompat(){
+  const model = (document.getElementById('smartModel')?.value || '').trim();
+  const length = parseFloat(document.getElementById('smartLength')?.value);
+  const width = parseFloat(document.getElementById('smartWidth')?.value);
+  const tolerance = parseFloat(document.getElementById('smartTolerance')?.value) || 1;
+  const out = document.getElementById('smartCompatResults');
+  if(!model){ showToast('اكتب الموديل المطلوب'); return; }
+  if(isNaN(length) || isNaN(width) || length<=0 || width<=0){
+    showToast('أدخل الطول والعرض بالمليمتر'); return;
+  }
+  const target={length,width};
+  const results = products
+    .filter(p=>Number(p.qty)>0)
+    .map(p=>({p,d:dimensionDistance(target,getModelDimensions(p.name)), exact:getModelDimensions(p.name)}))
+    .filter(x=>x.d && x.d.dl<=tolerance && x.d.dw<=tolerance)
+    .sort((a,b)=>a.d.score-b.d.score)
+    .slice(0,20);
+
+  if(results.length===0){
+    out.innerHTML=`<div class="empty"><span class="big">📐</span>لا يوجد بديل بأبعاد قريبة ضمن ${tolerance} مم.<div class="hint">يمكنك زيادة هامش الفرق أو حفظ أبعاد منتجات المخزون.</div></div>`;
+    return;
+  }
+  out.innerHTML=`
+    <div class="section-title"><span>بدائل لـ «${escapeHtml(model)}»</span></div>
+    <div class="row-sub" style="margin-bottom:8px;">المطلوب: ${length} × ${width} mm — النتائج مرتبة من الأقرب.</div>
+    <div class="ledger">${results.map(({p,d,exact})=>{
+      const g=dimensionGrade(d);
+      return `<div class="row">
+        <div class="row-main">
+          <div class="row-name">${escapeHtml(p.name)}</div>
+          <div class="row-sub">${exact.length} × ${exact.width} mm · فرق ${d.dl.toFixed(1)} × ${d.dw.toFixed(1)} mm</div>
+          <span class="cat-badge ${g.cls==='alert'?'other':g.cls}" style="margin-top:5px;">${g.label}</span>
+        </div>
+        <div class="qty-pill ${p.qty<=LOW_STOCK_THRESHOLD?'low':''}">${p.qty} قطعة</div>
+        <button class="btn btn-brass" style="padding:7px 10px;font-size:11px;" onclick="useSmartCompat('${p.id}', '${escapeHtml(model).replace(/'/g,"&#39;")}')">استخدم</button>
+      </div>`;
+    }).join('')}</div>`;
+}
+
+function useSmartCompat(productId, requestedModel){
+  const p=products.find(x=>x.id===productId);
+  if(!p || p.qty<=0){ showToast('المنتج لم يعد متوفراً'); return; }
+  // مهم: نخصم من المنتج الموجود فعلياً، لكن اسم الفاتورة يبقى هو الموديل الذي طلبه الزبون.
+  cart[productId] = Math.min((cart[productId]||0) + CART_STEP, p.qty);
+  cartDisplayName[productId] = requestedModel;
+  closeOverlay();
+  switchScreen('sell');
+  const q=document.getElementById('posSearch');
+  if(q) q.value='';
+  renderPos();
+  showToast(`تم اختيار ${p.name} كبديل — الفاتورة باسم ${requestedModel}`);
+}
+
+function openCompatDimensions(){
+  const sheet=document.getElementById('sheetContent');
+  const rows=Object.entries(compatDimensions).map(([key,d])=>({key,d}));
+  sheet.innerHTML=`
+    <div class="sheet-head"><h3>📐 أبعاد الموديلات</h3><button class="icon-btn" onclick="openCompatGroups()">✕</button></div>
+    <div class="field"><label>الموديل</label><input id="dimModel" placeholder="مثال: Realme C85"></div>
+    <div class="two-col">
+      <div class="field"><label>الطول mm</label><input type="number" step="0.1" id="dimLength"></div>
+      <div class="field"><label>العرض mm</label><input type="number" step="0.1" id="dimWidth"></div>
+    </div>
+    <button class="btn btn-brass btn-block" onclick="saveModelDimension()">حفظ الأبعاد</button>
+    <div style="margin-top:14px;" class="ledger">${rows.length?rows.map(x=>`<div class="row"><div class="row-main"><div class="row-name">${escapeHtml(x.key)}</div><div class="row-sub">${x.d.length} × ${x.d.width} mm</div></div><button class="icon-btn" onclick="deleteModelDimension('${x.key}')">🗑</button></div>`).join(''):'<div class="empty">لا توجد أبعاد محفوظة بعد</div>'}</div>
+  `;
+  openOverlay();
+}
+
+async function saveModelDimension(){
+  const model=(document.getElementById('dimModel')?.value||'').trim();
+  const length=parseFloat(document.getElementById('dimLength')?.value);
+  const width=parseFloat(document.getElementById('dimWidth')?.value);
+  if(!model || isNaN(length)||isNaN(width)||length<=0||width<=0){showToast('أدخل الموديل والطول والعرض');return;}
+  compatDimensions[normalizeDimModel(model)]={length,width,displayName:model};
+  await saveCompatDimensions();
+  openCompatDimensions();
+  showToast('تم حفظ الأبعاد');
+}
+async function deleteModelDimension(model){ delete compatDimensions[normalizeDimModel(model)]; await saveCompatDimensions(); openCompatDimensions(); }
+
 /* ================= Glass Compatibility Groups ================= */
 function openCompatGroups(){
   const sheet = document.getElementById('sheetContent');
@@ -4089,6 +4288,10 @@ function openCompatGroups(){
     </div>
     <div class="search-bar">
       <input type="text" id="groupSearch" placeholder="ابحث عن منتج أو موديل..." oninput="renderCompatGroupsList()">
+    </div>
+    <div class="sheet-actions" style="margin-bottom:14px;display:grid;grid-template-columns:1fr 1fr;gap:8px;">
+      <button class="btn btn-brass" onclick="openSmartCompat()">🔎 اقتراح بديل</button>
+      <button class="btn btn-outline" onclick="openCompatDimensions()">📐 أبعاد الموديلات</button>
     </div>
     <div class="sheet-actions" style="margin-bottom:14px;">
       <button class="btn btn-brass btn-block" onclick="openCompatGroupForm(null)">+ إضافة مجموعة</button>
