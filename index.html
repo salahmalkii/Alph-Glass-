@@ -738,6 +738,11 @@ nav.no-print{display:none!important;}
   .home-tile:nth-child(1){grid-column:span 2;}
 }
 </style>
+
+<style>
+.all-features-icon{width:28px;height:28px;display:inline-flex;align-items:center;justify-content:center;flex:0 0 28px;}
+.all-features-icon .home-modern-icon{width:24px;height:24px;display:block;}
+</style>
 </head>
 <body>
 
@@ -1472,7 +1477,7 @@ function openAllFeaturesMenu(){
       ${ALL_HOME_FEATURES.map(f=>`
         <div class="row" style="cursor:pointer;" onclick="${f.type==='screen' ? 'closeOverlay();' : ''}${f.action}">
           <div class="row-main">
-            <div class="row-name">${f.icon} ${escapeHtml(f.title)}</div>
+            <div class="row-name" style="display:flex;align-items:center;gap:12px;"><span class="all-features-icon" style="color:${f.color||'#4a86e0'};">${homeIconSvg(f.icon)}</span><span>${escapeHtml(f.title)}</span></div>
           </div>
         </div>
       `).join('')}
