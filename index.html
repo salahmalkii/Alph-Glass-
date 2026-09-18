@@ -2114,18 +2114,35 @@ async function fetchPhoneDimensions(){
   if(btn){btn.disabled=true;btn.textContent='⏳ جاري البحث...';}
   if(status)status.textContent='جاري البحث في قاعدة مواصفات الهواتف...';
 
+  // اختصارات شائعة يكتبها التجّار بدل الاسم الكامل (sam بدل samsung، iph بدل iphone...).
+  // نوسّعها لاسم العلامة الكامل قبل البحث، لأن مصادر المواصفات (GSMArena وويكيبيديا) لا تتعرف على الاختصار.
+  const brandAbbrev={
+    sam:'samsung',ss:'samsung',samsng:'samsung',
+    iph:'iphone',ip:'iphone',aple:'apple',
+    xiao:'xiaomi',mi:'xiaomi',poco:'poco',
+    rm:'realme',rlm:'realme',realm:'realme',
+    inf:'infinix',tec:'tecno',hon:'honor',hono:'honor',
+    hw:'huawei',hua:'huawei',opp:'oppo',viv:'vivo',
+    nok:'nokia',mot:'motorola',len:'lenovo',
+    gxy:'galaxy'
+  };
   const norm=x=>String(x||'').toLowerCase()
     .normalize('NFD').replace(/[\u0300-\u036f]/g,'')
     .replace(/[®™]/g,'').replace(/realma/g,'realme')
     .replace(/xiaomi\s+redmi/g,'redmi').replace(/redmi\s+/g,'redmi ')
-    .replace(/[^a-z0-9]+/g,' ').replace(/\s+/g,' ').trim();
+    .replace(/[^a-z0-9]+/g,' ').replace(/\s+/g,' ').trim()
+    .split(' ').map(t=>brandAbbrev[t]||t).join(' ').replace(/\s+/g,' ').trim();
   const key=norm(name);
   const tokens=key.split(' ').filter(Boolean);
 
-  // قاعدة محلية سريعة للأكثر استعمالاً، وتستمر في العمل دون إنترنت.
+  // قاعدة محلية سريعة للأكثر استعمالاً، وتستمر في العمل دون إنترنت — حتى لو تعطّلت كل مصادر الإنترنت.
+  // كل بحث ناجح (محليًا أو عبر الإنترنت) يُضاف تلقائيًا هنا (عبر compatDimensions) فلا تحتاج للبحث عنه مرة ثانية.
   const local={
     'realme c85':[164.0,75.9],'redmi 14c':[171.9,77.8],
-    'realme c75':[165.6,76.1],'realme c71':[163.8,75.7]
+    'realme c75':[165.6,76.1],'realme c71':[163.8,75.7],
+    'samsung galaxy m20':[156.4,74.5],'samsung m20':[156.4,74.5],
+    'samsung galaxy a10':[155.6,75.6],'samsung a10':[155.6,75.6],
+    'samsung galaxy a20':[158.4,74.7],'samsung a20':[158.4,74.7]
   };
 
   function parseDims(raw){
@@ -2219,6 +2236,32 @@ async function fetchPhoneDimensions(){
             const slug=String(slugRaw).replace(/^https?:\/\/[^/]+\//,'').replace(/^\//,'');
             const dj=await getJson(base+'/'+slug);
             found=scan(dj?.specifications)||scan(dj);
+          }
+        }catch(e){ /* ننتقل للمحاولة التالية */ }
+      }
+
+      // محاولة إضافية عبر قائمة العلامات ثم أجهزة العلامة (تعمل غالبًا للهواتف الحديثة فقط،
+      // لأن كل علامة تُعيد أحدث ~50 جهازًا بلا صفحات إضافية؛ الهواتف القديمة تحتاج القاعدة المحلية أو الإدخال اليدوي).
+      if(!found){
+        try{
+          const knownBrands=['samsung','apple','xiaomi','redmi','poco','realme','oppo','vivo','infinix','tecno','honor','huawei','oneplus','google','motorola','nokia','sony','asus','zte','lenovo','nothing'];
+          const brandWord=tokens.find(t=>knownBrands.includes(t));
+          if(brandWord){
+            const bj=await getJson(base+'/brands');
+            const brandsObj=bj?.data||{};
+            const entry=Object.entries(brandsObj).find(([bn])=>norm(bn)===brandWord || norm(bn).includes(brandWord));
+            const brandSlug=entry?.[1]?.brand_slug;
+            if(brandSlug){
+              const lj=await getJson(base+'/brands/'+brandSlug);
+              const phones=Array.isArray(lj?.data)?lj.data:(lj?.data?.devices||lj?.devices||[]);
+              const hit=pick(phones);
+              const slugRaw=hit?.slug||hit?.id;
+              if(slugRaw){
+                const slug=String(slugRaw).replace(/^\//,'');
+                const dj=await getJson(base+'/'+slug);
+                found=scan(dj?.specifications)||scan(dj);
+              }
+            }
           }
         }catch(e){ /* ننتقل للمصدر التالي */ }
       }
