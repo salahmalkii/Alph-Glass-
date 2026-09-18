@@ -1691,7 +1691,7 @@ function openFeatureCategory(id){
     <div class="feature-subtitle">${escapeHtml(g.sub)}</div>
     <div class="ledger feature-submenu">
       ${g.items.map(([title,icon,action])=>`
-        <button class="feature-item-row" onclick="${action}">
+        <button class="feature-item-row" onclick="runFeatureAction(${JSON.stringify(action)})">
           <span class="feature-item-icon">${homeIconSvg(icon)}</span>
           <span>${escapeHtml(title)}</span>
           <span class="feature-category-arrow">‹</span>
@@ -6168,6 +6168,24 @@ async function saveHomeTiles(){
   showToast('تم حفظ اختصاراتك');
 }
 
+function runFeatureAction(action){
+  // أغلق نافذة الميزات قبل الانتقال إلى شاشة/نافذة أخرى، مع الحفاظ على تاريخ الشاشة الحالية.
+  const ov = document.getElementById('overlay');
+  if(ov && ov.classList.contains('active')){
+    if(overlayHistoryPushed){
+      history.replaceState({screen: currentScreenState}, '', location.href);
+      overlayHistoryPushed = false;
+    }
+    ov.classList.remove('active');
+  }
+  try{
+    Function(action)();
+  }catch(err){
+    console.error('Feature action failed:', action, err);
+    showToast('تعذر فتح هذه الميزة');
+  }
+}
+
 function openSettings(){
   const sheet = document.getElementById('sheetContent');
   const hasPin = !!settings.profitPin;
@@ -6342,18 +6360,25 @@ async function saveSettingsForm(){
 let overlayHistoryPushed = false;
 
 function openOverlay(){
-  document.getElementById('overlay').classList.add('active');
-  if(!overlayHistoryPushed){
-    history.pushState({ modal: true }, '', location.href);
-    overlayHistoryPushed = true;
+  const ov = document.getElementById('overlay');
+  if(!ov) return;
+  // لا ننشئ History جديدًا عند الانتقال بين نوافذ داخل النافذة نفسها.
+  if(!ov.classList.contains('active')){
+    ov.classList.add('active');
+    if(!overlayHistoryPushed){
+      history.pushState({ modal: true, screen: currentScreenState }, '', location.href);
+      overlayHistoryPushed = true;
+    }
   }
 }
 function closeOverlay(){
+  const ov = document.getElementById('overlay');
+  if(!ov) return;
   if(overlayHistoryPushed){
     overlayHistoryPushed = false;
     history.back();
   }else{
-    document.getElementById('overlay').classList.remove('active');
+    ov.classList.remove('active');
   }
 }
 function closeOverlayIfBackdrop(e){ if(e.target.id==='overlay') closeOverlay(); }
