@@ -1670,8 +1670,12 @@ function openAllFeaturesMenu(){
       `).join('')}
     </div>
   `;
-  openOverlay();
-
+  // ميزات Alpha Glass تعمل داخل لوحة مستقلة بدون إضافة خطوة إلى History
+  // حتى لا يتداخل زر الرجوع مع تنقل الشاشات الرئيسية.
+  const ov = document.getElementById('overlay');
+  if(ov) ov.classList.add('active');
+  overlayHistoryPushed = false;
+  window.__alphaFeatureMode = true;
   window.__alphaFeatureGroups = groups;
 }
 
@@ -6175,24 +6179,26 @@ async function saveHomeTiles(){
 
 function runFeatureAction(action){
   try{
-    // أفعال الانتقال إلى شاشة كاملة: أغلق قائمة الميزات ثم انتقل للشاشة.
-    const screenMatch = String(action).match(/^switchScreen\(['"]([^'"]+)['"]\)$/);
+    const value = String(action || '').trim();
+    // الشاشات الرئيسية: أغلق لوحة الميزات ثم انتقل للشاشة مباشرة.
+    const screenMatch = value.match(/^switchScreen\(['"]([^'"]+)['"]\)$/);
     if(screenMatch){
       const ov = document.getElementById('overlay');
-      if(ov){ ov.classList.remove('active'); }
+      if(ov) ov.classList.remove('active');
       overlayHistoryPushed = false;
       __alphaFeatureReturnCategory = null;
+      window.__alphaFeatureMode = false;
       switchScreen(screenMatch[1]);
       return;
     }
 
-    // باقي الميزات تفتح داخل نفس النافذة. عند الضغط على X/الرجوع تعود إلى تصنيفها،
-    // بدلًا من الخروج إلى الصفحة الرئيسية.
+    // الميزات التي تفتح Sheet: احتفظ بالتصنيف حتى يعود زر X إليه.
     __alphaFeatureReturnCategory = __alphaFeatureCategory;
-
-    const m = String(action).match(/^([A-Za-z_$][\w$]*)\(\)$/);
-    if(!m || typeof window[m[1]] !== 'function') throw new Error('Unknown feature: '+action);
-    window[m[1]]();
+    const m = value.match(/^([A-Za-z_$][\w$]*)\(\)$/);
+    if(!m) throw new Error('Invalid feature action: '+value);
+    const fn = window[m[1]];
+    if(typeof fn !== 'function') throw new Error('Unknown feature: '+m[1]);
+    fn();
   }catch(err){
     console.error('Feature action failed:', action, err);
     showToast('تعذر فتح هذه الميزة');
@@ -6388,11 +6394,18 @@ function closeOverlay(){
   const ov = document.getElementById('overlay');
   if(!ov) return;
 
-  // إذا كانت ميزة مفتوحة من داخل "ميزات Alpha Glass"، ارجع أولًا إلى تصنيفها.
+  // داخل ميزات Alpha Glass: X/الرجوع يعيد إلى التصنيف بدل الصفحة الرئيسية.
   if(__alphaFeatureReturnCategory){
     const id = __alphaFeatureReturnCategory;
     __alphaFeatureReturnCategory = null;
     openFeatureCategory(id);
+    return;
+  }
+
+  if(window.__alphaFeatureMode){
+    window.__alphaFeatureMode = false;
+    ov.classList.remove('active');
+    overlayHistoryPushed = false;
     return;
   }
 
