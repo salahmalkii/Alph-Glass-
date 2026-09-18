@@ -759,6 +759,18 @@ nav.no-print{display:none!important;}
 .stats-list-row{display:flex;align-items:center;gap:8px;padding:9px 0;border-bottom:1px solid rgba(148,163,184,.10)}.stats-list-row:last-child{border-bottom:0}.stats-list-row em{font-style:normal;width:22px;height:22px;border-radius:8px;display:flex;align-items:center;justify-content:center;background:rgba(56,189,248,.10);font-size:10px}.stats-list-row div{min-width:0;flex:1}.stats-list-row b{display:block;font-size:11px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}.stats-list-row small{display:block;color:var(--muted);font-size:9px;margin-top:2px}.stats-list-row>strong{font-size:10px;white-space:nowrap}.stock-dot{width:9px;height:9px;border-radius:50%;background:#f59e0b;box-shadow:0 0 8px rgba(245,158,11,.45);flex:0 0 9px}.stock-dot.zero{background:#ef4444;box-shadow:0 0 8px rgba(239,68,68,.45)}
 @media(max-width:520px){.stats-filters{grid-template-columns:1fr 1fr}.stats-filters select:last-child{grid-column:1/-1}.stats-two-col{grid-template-columns:1fr}.stats-chart-wrap,.stats-chart-wrap canvas{height:225px}}
 </style>
+
+<style>
+.ag-smart-tools{display:grid;grid-template-columns:repeat(2,1fr);gap:9px;margin:10px 0 14px}
+.ag-smart-tool{border:1px solid rgba(56,189,248,.16);border-radius:16px;background:linear-gradient(145deg,rgba(56,189,248,.08),rgba(255,255,255,.02));padding:12px;text-align:right;cursor:pointer;color:var(--text);font-family:'Cairo',sans-serif}
+.ag-smart-tool:active{transform:scale(.98)}
+.ag-smart-tool .ico{font-size:22px;display:block;margin-bottom:5px}.ag-smart-tool b{font-size:12px;display:block}.ag-smart-tool small{font-size:9px;color:var(--muted);display:block;margin-top:3px}
+.ag-mini-grid{display:grid;grid-template-columns:repeat(2,1fr);gap:8px;margin-bottom:12px}.ag-mini{padding:11px;border-radius:14px;background:rgba(255,255,255,.035);border:1px solid rgba(148,163,184,.13)}.ag-mini b{display:block;font-size:17px}.ag-mini span{font-size:9px;color:var(--muted)}
+.ag-alert{padding:10px 11px;border-radius:13px;margin-bottom:7px;border:1px solid rgba(245,158,11,.18);background:rgba(245,158,11,.06)}
+.ag-alert.red{border-color:rgba(239,68,68,.22);background:rgba(239,68,68,.06)}
+.ag-table{width:100%;border-collapse:collapse;font-size:10px}.ag-table th,.ag-table td{padding:8px 5px;border-bottom:1px solid rgba(148,163,184,.1);text-align:right}.ag-table th{color:var(--muted);font-size:9px}.ag-positive{color:var(--profit)}.ag-negative{color:var(--alert)}
+@media(max-width:520px){.ag-smart-tools{grid-template-columns:1fr 1fr}}
+</style>
 </head>
 <body>
 
@@ -906,6 +918,15 @@ nav.no-print{display:none!important;}
         <div class="v mono" id="statNetProfit">0</div>
         <div class="l">الربح بعد المصاريف</div>
       </div>
+    </div>
+    <div class="section-title"><span>🧠 أدوات تحليل التجارة</span></div>
+    <div class="ag-smart-tools">
+      <button class="ag-smart-tool" onclick="openSmartAlerts()"><span class="ico">🚨</span><b>التنبيهات الذكية</b><small>نقص، نفاد، منتجات راكدة</small></button>
+      <button class="ag-smart-tool" onclick="openPurchaseAssistant()"><span class="ico">🛒</span><b>مساعد الشراء</b><small>اقتراح الكميات المطلوبة</small></button>
+      <button class="ag-smart-tool" onclick="openStockMovementAnalysis()"><span class="ico">📈</span><b>حركة المخزون</b><small>سرعة البيع وأيام التغطية</small></button>
+      <button class="ag-smart-tool" onclick="openProductRanking()"><span class="ico">🏆</span><b>ترتيب المنتجات</b><small>كمية، مبيعات، ربح، هامش</small></button>
+      <button class="ag-smart-tool" onclick="openCustomerAnalysis()"><span class="ico">👥</span><b>تحليل العملاء</b><small>شراء، متوسط، دين، آخر طلب</small></button>
+      <button class="ag-smart-tool" onclick="openDeadStock()"><span class="ico">🐌</span><b>المنتجات الراكدة</b><small>لم تتحرك منذ فترة</small></button>
     </div>
     <div class="section-title"><span>آخر 7 أيام (الربح)</span></div>
     <div class="bars" id="weekBars"></div>
@@ -3724,6 +3745,9 @@ function openCustomerDetail(id){
       <button class="btn btn-ghost-alert" onclick="openDebtForm('${c.id}', 'debt')">تسجيل دين</button>
       <button class="btn btn-brass" onclick="openDebtForm('${c.id}', 'payment')">تسجيل سداد</button>
     </div>
+    <div class="sheet-actions" style="margin-bottom:16px;">
+      <button class="btn btn-outline btn-block" onclick="openCustomerStatement('${c.id}')">📄 كشف حساب مفصل</button>
+    </div>
     <div class="section-title"><span>الحركات السابقة</span></div>
     <div class="ledger">
       ${tx.length === 0 ? `<div class="empty" style="padding:24px;">لا توجد حركات بعد</div>` : tx.map(t=>{
@@ -3881,6 +3905,85 @@ async function deleteCustomerTx(txId){
   showToast('تم حذف الحركة');
 }
 
+
+/* ================= Smart business analytics ================= */
+function periodInvoices(days=30){
+  const since = new Date(); since.setHours(0,0,0,0); since.setDate(since.getDate()-days+1);
+  return invoices.filter(i=>new Date(i.date)>=since);
+}
+function productSalesMap(days=30){
+  const map={};
+  periodInvoices(days).forEach(inv=>inv.items.forEach(it=>{
+    const key=it.productId || it.name;
+    if(!map[key]) map[key]={name:it.name,qty:0,revenue:0,profit:0};
+    map[key].qty += Number(it.qty)||0;
+    map[key].revenue += (Number(it.qty)||0)*(Number(it.sellPrice)||0);
+    map[key].profit += (Number(it.qty)||0)*((Number(it.sellPrice)||0)-(Number(it.buyPrice)||0));
+  }));
+  return map;
+}
+function openSmartAlerts(){
+  const sheet=document.getElementById('sheetContent');
+  const low=products.filter(p=>p.qty>0 && p.qty<=LOW_STOCK_THRESHOLD).sort((a,b)=>a.qty-b.qty);
+  const zero=products.filter(p=>p.qty<=0);
+  const dead=products.filter(p=>{
+    if((Number(p.qty)||0)<=0) return false;
+    const last=invoices.reduce((mx,inv)=>{
+      if(inv.items.some(it=>(it.productId&&it.productId===p.id)||it.name===p.name)) return Math.max(mx,new Date(inv.date).getTime());
+      return mx;
+    },0);
+    const age=last?((Date.now()-last)/86400000):((p.createdAt?Date.now()-new Date(p.createdAt).getTime():Infinity)/86400000);
+    return age>=30;
+  });
+  sheet.innerHTML=`<div class="sheet-head"><h3>🚨 التنبيهات الذكية</h3><button class="icon-btn" onclick="closeOverlay()">✕</button></div>
+    <div class="ag-mini-grid"><div class="ag-mini"><b>${zero.length}</b><span>منتهية الكمية</span></div><div class="ag-mini"><b>${low.length}</b><span>مخزون منخفض</span></div><div class="ag-mini"><b>${dead.length}</b><span>راكدة +30 يوم</span></div><div class="ag-mini"><b>${products.length}</b><span>إجمالي المنتجات</span></div></div>
+    ${zero.length?`<div class="section-title"><span>🔴 نفد المخزون</span></div>${zero.slice(0,20).map(p=>`<div class="ag-alert red"><b>${escapeHtml(p.name)}</b><div class="row-sub">الكمية: 0</div></div>`).join('')}`:''}
+    ${low.length?`<div class="section-title"><span>🟠 مخزون منخفض</span></div>${low.slice(0,20).map(p=>`<div class="ag-alert"><b>${escapeHtml(p.name)}</b><div class="row-sub">المتبقي: ${plainNum(p.qty)} قطعة</div></div>`).join('')}`:''}
+    ${(!zero.length&&!low.length&&!dead.length)?`<div class="empty"><span class="big">✅</span>لا توجد تنبيهات حالياً</div>`:''}
+    ${dead.length?`<div class="section-title"><span>🐌 منتجات راكدة</span></div>${dead.slice(0,10).map(p=>`<div class="ag-alert"><b>${escapeHtml(p.name)}</b><div class="row-sub">المخزون: ${plainNum(p.qty)} — لم تتحرك منذ 30 يومًا أو أكثر</div></div>`).join('')}`:''}`;
+  openOverlay();
+}
+function openDeadStock(){
+  const sheet=document.getElementById('sheetContent'); const now=Date.now();
+  const rows=products.filter(p=>p.qty>0).map(p=>{
+    let last=0; invoices.forEach(inv=>inv.items.forEach(it=>{if((it.productId&&it.productId===p.id)||it.name===p.name) last=Math.max(last,new Date(inv.date).getTime());}));
+    const age=last?(now-last)/86400000:9999; return {...p,age};
+  }).filter(p=>p.age>=30).sort((a,b)=>b.age-a.age);
+  sheet.innerHTML=`<div class="sheet-head"><h3>🐌 المنتجات الراكدة</h3><button class="icon-btn" onclick="closeOverlay()">✕</button></div>
+  <div class="row-sub" style="margin-bottom:12px;">المنتجات الموجودة في المخزون والتي لم تُبع منذ 30 يومًا أو أكثر. المنتج الجديد بدون مبيعات يظهر هنا فقط إذا كان عمره 30 يومًا أو أكثر.</div>
+  ${rows.length?`<div class="ledger">${rows.map(p=>`<div class="row"><div class="row-main"><div class="row-name">${escapeHtml(p.name)}</div><div class="row-sub">مخزون: ${plainNum(p.qty)} — ${p.age>9000?'لا توجد مبيعات مسجلة':'آخر بيع منذ '+Math.floor(p.age)+' يوم'}</div></div></div>`).join('')}</div>`:`<div class="empty"><span class="big">🎉</span>لا توجد منتجات راكدة</div>`}`;
+  openOverlay();
+}
+function openPurchaseAssistant(){
+  const sheet=document.getElementById('sheetContent');
+  const rows=products.map(p=>{
+    const sold=periodInvoices(56).reduce((a,inv)=>a+inv.items.filter(it=>(it.productId&&it.productId===p.id)||it.name===p.name).reduce((x,it)=>x+(Number(it.qty)||0),0),0);
+    const weekly=sold/8; const target=Math.max(0,Math.ceil(weekly*4+Math.max(5,weekly)-Number(p.qty||0)));
+    return {...p,sold,weekly,suggested:target};
+  }).filter(p=>p.suggested>0).sort((a,b)=>b.suggested-a.suggested);
+  sheet.innerHTML=`<div class="sheet-head"><h3>🛒 مساعد الشراء</h3><button class="icon-btn" onclick="closeOverlay()">✕</button></div>
+  <div class="row-sub" style="margin-bottom:12px;">اقتراح تقريبي يعتمد على مبيعات آخر 8 أسابيع والمخزون الحالي، وليس أمر شراء إلزاميًا.</div>
+  ${rows.length?`<div class="ledger">${rows.slice(0,40).map(p=>`<div class="row"><div class="row-main"><div class="row-name">${escapeHtml(p.name)}</div><div class="row-sub">المخزون ${plainNum(p.qty)} · المبيعات 8 أسابيع ${plainNum(p.sold)} · ${plainNum(p.weekly)} قطعة/أسبوع</div></div><div class="qty-pill">+${plainNum(p.suggested)}</div></div>`).join('')}</div>`:`<div class="empty"><span class="big">✅</span>لا توجد منتجات تحتاج اقتراح شراء حاليًا</div>`}`;
+  openOverlay();
+}
+function openStockMovementAnalysis(){
+  const sheet=document.getElementById('sheetContent');
+  const rows=products.map(p=>{const sold=periodInvoices(30).reduce((a,inv)=>a+inv.items.filter(it=>(it.productId&&it.productId===p.id)||it.name===p.name).reduce((x,it)=>x+(Number(it.qty)||0),0),0); const daily=sold/30; const days=daily>0?(Number(p.qty)||0)/daily:Infinity; return {...p,sold,daily,days};}).filter(p=>p.sold>0||p.qty>0).sort((a,b)=>a.days-b.days);
+  sheet.innerHTML=`<div class="sheet-head"><h3>📈 حركة المخزون</h3><button class="icon-btn" onclick="closeOverlay()">✕</button></div><div class="row-sub" style="margin-bottom:12px;">الحساب هنا يعتمد على مبيعات آخر 30 يومًا. «أيام التغطية» تقدير للمدة التي قد يكفيها المخزون الحالي بنفس معدل البيع.</div><table class="ag-table"><thead><tr><th>المنتج</th><th>بيع 30ي</th><th>يومي</th><th>تغطية</th></tr></thead><tbody>${rows.slice(0,60).map(p=>`<tr><td>${escapeHtml(p.name)}</td><td>${plainNum(p.sold)}</td><td>${p.daily?plainNum(p.daily):'0'}</td><td>${p.days===Infinity?'—':Math.round(p.days)+' يوم'}</td></tr>`).join('')}</tbody></table>`; openOverlay();
+}
+function openProductRanking(){
+  const sheet=document.getElementById('sheetContent'); const map=productSalesMap(90); const rows=Object.values(map).map(x=>({...x,margin:x.revenue?x.profit/x.revenue*100:0}));
+  sheet.innerHTML=`<div class="sheet-head"><h3>🏆 ترتيب المنتجات</h3><button class="icon-btn" onclick="closeOverlay()">✕</button></div><div class="chip-row" style="margin-bottom:12px;"><button class="chip active" onclick="renderProductRankingTable('qty')">الأكثر بيعًا</button><button class="chip" onclick="renderProductRankingTable('profit')">الأكثر ربحًا</button><button class="chip" onclick="renderProductRankingTable('margin')">الهامش</button></div><div id="agRankingTable"></div>`; openOverlay(); renderProductRankingTable('qty');
+}
+function renderProductRankingTable(mode){const el=document.getElementById('agRankingTable'); if(!el)return; const map=productSalesMap(90); const rows=Object.values(map).map(x=>({...x,margin:x.revenue?x.profit/x.revenue*100:0})).sort((a,b)=>(b[mode]-a[mode])); el.innerHTML=`<div class="row-sub" style="margin-bottom:8px;">آخر 90 يومًا</div><table class="ag-table"><thead><tr><th>#</th><th>المنتج</th><th>الكمية</th><th>المبيعات</th><th>الربح</th><th>الهامش</th></tr></thead><tbody>${rows.slice(0,50).map((p,i)=>`<tr><td>${i+1}</td><td>${escapeHtml(p.name)}</td><td>${plainNum(p.qty)}</td><td>${plainNum(p.revenue)}</td><td>${settings.hideProfit?'•••':plainNum(p.profit)}</td><td>${settings.hideProfit?'•••':p.margin.toFixed(1)+'%'}</td></tr>`).join('')}</tbody></table>`;}
+function openCustomerAnalysis(){
+  const sheet=document.getElementById('sheetContent'); const rows=customers.map(c=>{const inv=invoices.filter(i=>i.customerId===c.id); const total=inv.reduce((a,i)=>a+i.total,0); const pieces=inv.reduce((a,i)=>a+i.items.reduce((x,it)=>x+it.qty,0),0); const last=inv.length?Math.max(...inv.map(i=>new Date(i.date).getTime())):0; return {c,total,pieces,count:inv.length,last,avg:inv.length?total/inv.length:0};}).filter(r=>r.count||r.c.balance>0).sort((a,b)=>b.total-a.total);
+  sheet.innerHTML=`<div class="sheet-head"><h3>👥 تحليل العملاء</h3><button class="icon-btn" onclick="closeOverlay()">✕</button></div><div class="row-sub" style="margin-bottom:12px;">يعرض العملاء الذين لديهم مشتريات أو رصيد مستحق.</div><table class="ag-table"><thead><tr><th>العميل</th><th>المشتريات</th><th>فواتير</th><th>المتوسط</th><th>الدين</th><th>آخر شراء</th></tr></thead><tbody>${rows.slice(0,60).map(r=>`<tr onclick="openCustomerDetail('${r.c.id}')" style="cursor:pointer"><td>${escapeHtml(r.c.name)}</td><td>${plainNum(r.total)}</td><td>${r.count}</td><td>${plainNum(r.avg)}</td><td class="${r.c.balance>0?'ag-negative':'ag-positive'}">${plainNum(r.c.balance)}</td><td>${r.last?new Date(r.last).toLocaleDateString('ar'):'—'}</td></tr>`).join('')}</tbody></table>`; openOverlay();
+}
+function openCustomerStatement(id){
+  const c=customers.find(x=>x.id===id); if(!c)return; const inv=invoices.filter(i=>i.customerId===id).sort((a,b)=>new Date(b.date)-new Date(a.date)); const tx=customerTx.filter(t=>t.customerId===id).sort((a,b)=>new Date(b.date)-new Date(a.date)); const purchases=inv.reduce((a,i)=>a+i.total,0); const paid=tx.filter(t=>t.type==='payment').reduce((a,t)=>a+t.amount,0); const debts=tx.filter(t=>t.type==='debt').reduce((a,t)=>a+t.amount,0);
+  const sheet=document.getElementById('sheetContent'); sheet.innerHTML=`<div class="sheet-head"><h3>📄 كشف حساب — ${escapeHtml(c.name)}</h3><button class="icon-btn" onclick="openCustomerDetail('${c.id}')">✕</button></div><div class="ag-mini-grid"><div class="ag-mini"><b>${plainNum(purchases)}</b><span>إجمالي الفواتير</span></div><div class="ag-mini"><b>${inv.length}</b><span>عدد الفواتير</span></div><div class="ag-mini"><b>${plainNum(paid)}</b><span>إجمالي السداد</span></div><div class="ag-mini"><b class="ag-negative">${plainNum(c.balance)}</b><span>الرصيد الحالي</span></div></div><div class="section-title"><span>الفواتير</span></div>${inv.length?`<div class="ledger">${inv.map(i=>`<div class="row"><div class="row-main"><div class="row-name">فاتورة #${i.number}</div><div class="row-sub">${new Date(i.date).toLocaleDateString('ar')} · ${i.items.length} أصناف</div></div><div class="mono">${plainNum(i.total)}</div></div>`).join('')}</div>`:`<div class="empty">لا توجد فواتير</div>`}<div class="section-title"><span>الحركات المالية</span></div>${tx.length?`<div class="ledger">${tx.map(t=>`<div class="row"><div class="row-main"><div class="row-name">${t.type==='debt'?'دين':'سداد'}</div><div class="row-sub">${escapeHtml(t.note||'')} · ${new Date(t.date).toLocaleDateString('ar')}</div></div><div class="mono ${t.type==='debt'?'ag-negative':'ag-positive'}">${t.type==='debt'?'+':'−'}${plainNum(t.amount)}</div></div>`).join('')}</div>`:`<div class="empty">لا توجد حركات مالية</div>`}`; openOverlay();
+}
 
 /* ================= More menu ================= */
 /* ================= Suppliers & Their Debts ================= */
