@@ -737,6 +737,47 @@ nav.no-print{display:none!important;}
   .home-grid{grid-template-columns:repeat(3,minmax(0,1fr));}
   .home-tile:nth-child(1){grid-column:span 2;}
 }
+
+  .feature-category-grid{display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-top:4px;}
+  .feature-category-card{appearance:none;border:1px solid var(--border);background:linear-gradient(145deg,rgba(255,255,255,.055),rgba(255,255,255,.025));color:var(--text);border-radius:18px;padding:15px 12px;min-height:116px;text-align:right;display:flex;flex-direction:column;align-items:flex-start;gap:9px;cursor:pointer;transition:.18s ease;box-shadow:0 8px 24px rgba(0,0,0,.12);}
+  .feature-category-card:active{transform:scale(.98);background:rgba(255,255,255,.08);}
+  .feature-category-icon{width:40px;height:40px;display:flex;align-items:center;justify-content:center;}
+  .feature-category-icon .home-modern-icon{width:32px;height:32px;}
+  .feature-category-text{display:flex;flex-direction:column;gap:2px;min-width:0;width:100%;}
+  .feature-category-text b{font-size:14px;font-weight:800;}
+  .feature-category-text small{font-size:10px;color:var(--muted);line-height:1.5;}
+  .feature-category-arrow{font-size:22px;color:var(--muted);line-height:1;}
+  .feature-category-card>.feature-category-arrow{position:absolute;left:16px;bottom:15px;}
+  .feature-subtitle{font-size:11px;color:var(--muted);margin:0 0 12px;}
+  .feature-submenu{gap:7px;}
+  .feature-item-row{width:100%;border:1px solid var(--border);background:rgba(255,255,255,.035);color:var(--text);border-radius:14px;min-height:58px;padding:10px 12px;display:flex;align-items:center;gap:12px;text-align:right;font-family:inherit;font-size:14px;font-weight:700;cursor:pointer;}
+  .feature-item-row:active{background:rgba(255,255,255,.08);}
+  .feature-item-icon{width:30px;height:30px;display:flex;align-items:center;justify-content:center;flex:0 0 30px;color:var(--accent-a);}
+  .feature-item-icon .home-modern-icon{width:25px;height:25px;}
+  .feature-item-row .feature-category-arrow{margin-right:auto;}
+  @media(max-width:420px){.feature-category-grid{grid-template-columns:1fr;}.feature-category-card{min-height:92px;}}
+
+
+/* Modern settings organization */
+.settings-group-title{display:flex;align-items:center;gap:11px;margin:18px 2px 9px;}
+.settings-group-icon{width:38px;height:38px;border-radius:12px;display:flex;align-items:center;justify-content:center;background:rgba(155,111,222,.12);border:1px solid rgba(155,111,222,.22);font-size:19px;flex:0 0 auto;}
+.settings-group-icon.danger{background:rgba(255,70,70,.10);border-color:rgba(255,70,70,.22);}
+.settings-group-title b{display:block;font-size:14px;line-height:1.4;}
+.settings-group-title small{display:block;color:var(--muted);font-size:10.5px;margin-top:2px;line-height:1.5;}
+.settings-card{background:var(--surface);border:1px solid var(--border);border-radius:16px;padding:13px 14px;box-shadow:0 8px 24px rgba(0,0,0,.10);}
+.settings-card .field{margin-top:11px;}
+.settings-card .field label span{color:var(--muted);font-weight:500;font-size:10px;}
+.settings-card .row{padding:4px 0 11px;margin-bottom:2px;border-bottom:1px solid var(--border);}
+.settings-arrow{font-size:22px;color:var(--muted);line-height:1;}
+.settings-toggle-row{display:flex;align-items:center;justify-content:space-between;gap:12px;background:rgba(255,255,255,.025);border:1px solid var(--border);border-radius:12px;padding:11px 12px;}
+.settings-toggle-row b{display:block;font-size:13px;}
+.settings-toggle-row small{display:block;color:var(--muted);font-size:10.5px;margin-top:3px;}
+.settings-toggle-row input[type=checkbox]{width:21px;height:21px;flex:0 0 auto;}
+.settings-subtitle{font-size:11px;font-weight:800;color:var(--muted);margin:15px 2px 5px;padding-top:2px;}
+.settings-action-link{color:var(--accent-b);font-size:11px;font-weight:700;cursor:pointer;margin:7px 2px 2px;}
+.settings-danger-card{border-color:rgba(255,80,80,.22);background:rgba(255,60,60,.035);}
+.settings-danger-card .row{border-bottom:0;padding-bottom:2px;}
+.danger-arrow{color:var(--alert);}
 </style>
 
 <style>
@@ -1539,22 +1580,125 @@ function updateOrdersNavBadge(){
 
 function openAllFeaturesMenu(){
   const sheet = document.getElementById('sheetContent');
+  const groups = [
+    {
+      id:'sales', icon:'sale', color:'#4a86e0', title:'المبيعات والفواتير', sub:'البيع، الفواتير، الكتالوج والتوافقات',
+      items:[
+        ['بيع','sale',"switchScreen('sell')"],
+        ['تحضير طلبية','prepare',"startDraftOrderFlow()"],
+        ['الفواتير','invoices',"switchScreen('invoices')"],
+        ['قائمة المنتجات','catalog',"openProductCatalog()"],
+        ['مجموعات التوافق','compat',"openCompatGroups()"],
+        ['طباعة ملصق','label',"openLabelPrint()"],
+        ['المبيعات حسب الصنف','sold',"openDailySoldReport()"]
+      ]
+    },
+    {
+      id:'inventory', icon:'inventory', color:'#2fbf8f', title:'المخزون', sub:'الأصناف، الكميات، الحركة والتعديلات',
+      items:[
+        ['المخزون','inventory',"switchScreen('inventory')"],
+        ['سجل تعديلات المخزون','log',"openInventoryLog()"]
+      ]
+    },
+    {
+      id:'customers', icon:'customers', color:'#a15be0', title:'العملاء والحسابات', sub:'العملاء، الديون وكشوف الحساب',
+      items:[
+        ['العملاء','customers',"switchScreen('customers')"],
+        ['ديون متأخرة','debts',"openOverdueDebts()"]
+      ]
+    },
+    {
+      id:'orders', icon:'orders', color:'#2fbfa8', title:'الطلبيات', sub:'إنشاء ومتابعة وتجهيز الطلبيات',
+      items:[['الطلبيات','orders',"switchScreen('orders')"]]
+    },
+    {
+      id:'smart', icon:'stats', color:'#4a86e0', title:'ذكاء المخزون', sub:'تنبيهات، شراء ذكي، المنتجات الراكدة وسرعة الحركة',
+      items:[
+        ['الأصناف المنخفضة','inventory',"openLowStockList()"],
+        ['قائمة الشراء','purchase',"openPurchaseList()"],
+        ['حركة المخزون وسرعة البيع','stats',"openStockMovementAnalysis()"],
+        ['المنتجات الراكدة','stats',"openDeadProducts()"],
+        ['مساعد الشراء','purchase',"openPurchaseAssistant()"]
+      ]
+    },
+    {
+      id:'analytics', icon:'profits', color:'#38A8FF', title:'التحليلات والتقارير', sub:'أداء المنتجات، العملاء والمبيعات',
+      items:[
+        ['الإحصائيات','stats',"openMonthComparison()"],
+        ['تحليل المنتجات','stats',"openProductAnalysis()"],
+        ['تحليل العملاء','customers',"openCustomerAnalysis()"],
+        ['ملخص اليوم','daily',"openDailyClosing()"]
+      ]
+    },
+    {
+      id:'finance', icon:'profits', color:'#34D399', title:'المالية والأرباح', sub:'الأرباح، المصاريف والنتيجة الحقيقية',
+      items:[
+        ['الأرباح','profits',"switchScreen('profits')"],
+        ['المصاريف','expenses',"openExpenses()"],
+        ['ملخص إغلاق اليوم','daily',"openDailyClosing()"]
+      ]
+    },
+    {
+      id:'suppliers', icon:'suppliers', color:'#2fbfa8', title:'الموردون والمشتريات', sub:'الموردون وقائمة الاحتياجات للشراء',
+      items:[
+        ['الموردون','suppliers',"openSuppliers()"],
+        ['قائمة الشراء','purchase',"openPurchaseList()"]
+      ]
+    },
+    {
+      id:'settings', icon:'login', color:'#9B6FDE', title:'الإعدادات والأمان', sub:'النسخ الاحتياطي، الحماية وإعدادات التطبيق',
+      items:[
+        ['الإعدادات','login',"openSettings()"],
+        ['سجل الدخول','login',"openLoginLog()"],
+        ['نسخة احتياطية','backup',"openBackup()"]
+      ]
+    }
+  ];
+
   sheet.innerHTML = `
     <div class="sheet-head">
-      <h3 style="color:#9B6FDE;">كل الميزات</h3>
+      <h3 style="color:#9B6FDE;">ميزات Alpha Glass</h3>
       <button class="icon-btn" onclick="closeOverlay()">✕</button>
     </div>
-    <div class="ledger">
-      ${ALL_HOME_FEATURES.map(f=>`
-        <div class="row" style="cursor:pointer;" onclick="${f.type==='screen' ? 'closeOverlay();' : ''}${f.action}">
-          <div class="row-main">
-            <div class="row-name" style="display:flex;align-items:center;gap:12px;"><span class="all-features-icon" style="color:${f.color||'#4a86e0'};">${homeIconSvg(f.icon)}</span><span>${escapeHtml(f.title)}</span></div>
-          </div>
-        </div>
+    <div class="feature-category-grid">
+      ${groups.map(g=>`
+        <button class="feature-category-card" onclick="openFeatureCategory('${g.id}')">
+          <span class="feature-category-icon" style="color:${g.color};">${homeIconSvg(g.icon)}</span>
+          <span class="feature-category-text"><b>${escapeHtml(g.title)}</b><small>${escapeHtml(g.sub)}</small></span>
+          <span class="feature-category-arrow">‹</span>
+        </button>
       `).join('')}
     </div>
   `;
   openOverlay();
+
+  window.__alphaFeatureGroups = groups;
+}
+
+function openFeatureCategory(id){
+  const groups = window.__alphaFeatureGroups || [];
+  const g = groups.find(x=>x.id===id);
+  if(!g) return;
+  const sheet = document.getElementById('sheetContent');
+  sheet.innerHTML = `
+    <div class="sheet-head">
+      <div style="display:flex;align-items:center;gap:10px;">
+        <button class="icon-btn" onclick="openAllFeaturesMenu()">›</button>
+        <h3>${escapeHtml(g.title)}</h3>
+      </div>
+      <button class="icon-btn" onclick="closeOverlay()">✕</button>
+    </div>
+    <div class="feature-subtitle">${escapeHtml(g.sub)}</div>
+    <div class="ledger feature-submenu">
+      ${g.items.map(([title,icon,action])=>`
+        <button class="feature-item-row" onclick="${action}">
+          <span class="feature-item-icon">${homeIconSvg(icon)}</span>
+          <span>${escapeHtml(title)}</span>
+          <span class="feature-category-arrow">‹</span>
+        </button>
+      `).join('')}
+    </div>
+  `;
 }
 
 function openLowStockList(){
@@ -6029,117 +6173,41 @@ function openSettings(){
   const hasPin = !!settings.profitPin;
   sheet.innerHTML = `
     <div class="sheet-head">
-      <h3 style="color:#9B6FDE;">إعدادات المتجر</h3>
+      <div><h3 style="color:#9B6FDE;margin-bottom:3px;">الإعدادات</h3><div style="font-size:11px;color:var(--muted);">إدارة المتجر، الواجهة، الحماية والبيانات</div></div>
       <button class="icon-btn" onclick="closeOverlay()">✕</button>
     </div>
-    <div class="ledger" style="margin-bottom:16px;">
-      <div class="row" style="cursor:pointer;" onclick="openHomeTilesPicker()">
-        <div class="row-main">
-          <div class="row-name">🏠 تخصيص اختصارات الرئيسية</div>
-          <div class="row-sub">اختر حتى 6 اختصارات تظهر بالصفحة الرئيسية</div>
-        </div>
-      </div>
-    </div>
-    <div class="field">
-      <label>اسم المتجر (يظهر في الفاتورة)</label>
-      <input type="text" id="s-shopname" value="${escapeHtml(settings.shopName)}">
-    </div>
-    <div class="field">
-      <label>رقم الهاتف (يظهر في الفاتورة)</label>
-      <input type="tel" id="s-shopphone" value="${escapeHtml(settings.shopPhone||'')}" placeholder="05xxxxxxxx">
-    </div>
-    <div class="field">
-      <label>رقم هاتف صديقك (لإرسال الطلبيات مباشرة له)</label>
-      <input type="tel" id="s-friendphone" value="${escapeHtml(settings.friendPhone||'')}" placeholder="213xxxxxxxxx (مع رمز الدولة، بدون +)">
-    </div>
-    <div class="field">
-      <label>رمز العملة</label>
-      <input type="text" id="s-currency" value="${escapeHtml(settings.currency)}" placeholder="مثال: ر.س">
+
+    <div class="settings-group-title"><span class="settings-group-icon">⚙️</span><div><b>المتجر والتطبيق</b><small>المعلومات التي تظهر في الفواتير وتخصيص الواجهة</small></div></div>
+    <div class="settings-card">
+      <div class="row" style="cursor:pointer;" onclick="openHomeTilesPicker()"><div class="row-main"><div class="row-name">🏠 تخصيص اختصارات الرئيسية</div><div class="row-sub">اختر حتى 6 اختصارات تظهر بالصفحة الرئيسية</div></div><span class="settings-arrow">‹</span></div>
+      <div class="field"><label>اسم المتجر <span>• يظهر في الفاتورة</span></label><input type="text" id="s-shopname" value="${escapeHtml(settings.shopName)}"></div>
+      <div class="field"><label>رقم الهاتف <span>• يظهر في الفاتورة</span></label><input type="tel" id="s-shopphone" value="${escapeHtml(settings.shopPhone||'')}" placeholder="05xxxxxxxx"></div>
+      <div class="field"><label>رمز العملة</label><input type="text" id="s-currency" value="${escapeHtml(settings.currency)}" placeholder="مثال: دج"></div>
+      <div class="field" style="margin-bottom:0;"><label>رقم هاتف صديقك <span>• لإرسال الطلبيات مباشرة</span></label><input type="tel" id="s-friendphone" value="${escapeHtml(settings.friendPhone||'')}" placeholder="213xxxxxxxxx (بدون +)"></div>
     </div>
 
-    <div class="section-title"><span>الخصوصية</span></div>
-    <div class="field" style="display:flex;align-items:center;justify-content:space-between;background:var(--surface);border:1.5px solid var(--border);border-radius:10px;padding:12px 14px;margin-bottom:8px;">
-      <div>
-        <div style="font-weight:700;font-size:14px;">إخفاء الأرباح</div>
-        <div style="font-size:11.5px;color:var(--muted);margin-top:2px;">تختفي كل أرقام الأرباح من التطبيق</div>
-      </div>
-      <input type="checkbox" id="s-hideprofit" ${settings.hideProfit ? 'checked':''} onchange="onHideProfitChange()" style="width:20px;height:20px;">
+    <div class="settings-group-title"><span class="settings-group-icon">🔐</span><div><b>الخصوصية والحماية</b><small>حماية الأرباح وتأمين فتح التطبيق</small></div></div>
+    <div class="settings-card">
+      <div class="settings-toggle-row"><div><b>إخفاء الأرباح</b><small>تختفي كل أرقام الأرباح من التطبيق</small></div><input type="checkbox" id="s-hideprofit" ${settings.hideProfit ? 'checked':''} onchange="onHideProfitChange()"></div>
+      <div id="s-pin-set-wrap" style="display:none;"><div class="field"><label>رمز حماية الأرباح — 4 أرقام</label><input type="password" inputmode="numeric" maxlength="4" id="s-pin-set" placeholder="${hasPin ? '•••• (اتركه فارغًا للإبقاء عليه)' : 'مثال: 1234'}"></div></div>
+      <div id="s-pin-confirm-wrap" style="display:none;"><div class="field"><label>أدخل رمز الحماية لإظهار الأرباح</label><input type="password" inputmode="numeric" maxlength="4" id="s-pin-confirm" placeholder="••••"></div></div>
+      <div class="settings-subtitle">قفل التطبيق</div>
+      <div class="field"><label>رمز حماية فتح التطبيق <span>${settings.appPassword ? '• مفعّل' : '• غير مفعّل'}</span></label><input type="password" inputmode="numeric" maxlength="6" id="s-app-password" placeholder="${settings.appPassword ? '•••••• (اتركه فارغًا للإبقاء عليه)' : 'مثال: 1234'}" style="letter-spacing:6px;text-align:center;font-size:18px;"></div>
+      ${settings.appPassword ? `<div class="settings-action-link" onclick="document.getElementById('s-app-password').value='__CLEAR__';document.getElementById('s-app-password').type='text';document.getElementById('s-app-password').placeholder='سيتم إلغاء رمز الحماية عند الحفظ';document.getElementById('s-app-password').readOnly=true;">إلغاء رمز الحماية</div>` : ''}
+      ${settings.appPassword ? `<div class="settings-toggle-row" style="margin-top:10px;"><div><b>👆 فتح ببصمة الإصبع</b><small>${settings.fingerprintCredentialId ? 'مفعّلة على هذا الجهاز' : 'أسرع من كتابة الرمز كل مرة'}</small></div>${settings.fingerprintCredentialId ? `<button class="btn btn-ghost-alert" onclick="disableFingerprint()">إلغاء</button>` : `<button class="btn btn-brass" onclick="enableFingerprint()">تفعيل</button>`}</div>` : ''}
+      ${settings.appPassword ? `<div class="field" style="margin-top:10px;"><label>القفل التلقائي</label><select id="s-autolock"><option value="0" ${settings.autoLockMinutes==0?'selected':''}>بدون (معطّل)</option><option value="1" ${settings.autoLockMinutes==1?'selected':''}>دقيقة واحدة</option><option value="5" ${settings.autoLockMinutes==5?'selected':''}>5 دقائق</option><option value="15" ${settings.autoLockMinutes==15?'selected':''}>15 دقيقة</option><option value="30" ${settings.autoLockMinutes==30?'selected':''}>30 دقيقة</option></select></div>` : ''}
     </div>
 
-    <div id="s-pin-set-wrap" style="display:none;margin-bottom:8px;">
-      <div class="field">
-        <label>رمز حماية من 4 أرقام (يُطلب لاحقًا لإظهار الأرباح)</label>
-        <input type="password" inputmode="numeric" maxlength="4" id="s-pin-set" placeholder="${hasPin ? '•••• (اتركه فارغًا للإبقاء عليه)' : 'مثال: 1234'}">
-      </div>
-    </div>
+    ${settings.appPassword ? `<div class="settings-group-title"><span class="settings-group-icon">👤</span><div><b>الوصول المحدود</b><small>لصديقك أو موظفك — البيع والطلبيات فقط</small></div></div><div class="settings-card"><div class="row-sub" style="margin-bottom:10px;">حساب محدود بدون وصول للأرباح أو المخزون أو الإحصائيات أو باقي البيانات.</div><div class="field" style="margin-bottom:0;"><label>كلمة مرور الوصول المحدود <span>${settings.limitedPassword ? '• مفعّلة' : '• غير مفعّلة'}</span></label><input type="password" id="s-limited-password" placeholder="${settings.limitedPassword ? '•••••• (اتركه فارغًا للإبقاء عليها)' : 'اكتب كلمة مرور للتفعيل'}"></div>${settings.limitedPassword ? `<div class="settings-action-link" onclick="document.getElementById('s-limited-password').value='__CLEAR__';document.getElementById('s-limited-password').type='text';document.getElementById('s-limited-password').placeholder='سيتم إلغاء الوصول المحدود عند الحفظ';document.getElementById('s-limited-password').readOnly=true;">إلغاء الوصول المحدود</div>` : ''}</div>` : ''}
 
-    <div id="s-pin-confirm-wrap" style="display:none;margin-bottom:8px;">
-      <div class="field">
-        <label>أدخل رمز الحماية لإظهار الأرباح</label>
-        <input type="password" inputmode="numeric" maxlength="4" id="s-pin-confirm" placeholder="••••">
-      </div>
-    </div>
+    <div class="settings-group-title"><span class="settings-group-icon danger">⚠️</span><div><b>البيانات وإعادة الضبط</b><small>استخدمها بحذر قبل مسح بيانات المتجر</small></div></div>
+    <div class="settings-card settings-danger-card"><div class="row" style="cursor:pointer;" onclick="openResetData()"><div class="row-main"><div class="row-name" style="color:var(--alert);">🗑 البدء من جديد</div><div class="row-sub">مسح بيانات التجربة أو كل شيء</div></div><span class="settings-arrow danger-arrow">‹</span></div></div>
 
-    <div class="section-title"><span>حماية التطبيق</span></div>
-    <div class="field">
-      <label>رمز حماية فتح التطبيق (4-6 أرقام) ${settings.appPassword ? '(مفعّل حاليًا)' : '(غير مفعّل)'}</label>
-      <input type="password" inputmode="numeric" maxlength="6" id="s-app-password" placeholder="${settings.appPassword ? '•••••• (اتركه فارغًا للإبقاء عليه)' : 'مثال: 1234'}" style="letter-spacing:6px;text-align:center;font-size:18px;">
-    </div>
-    ${settings.appPassword ? `<div class="row-sub" style="margin-bottom:14px;color:var(--accent-b);cursor:pointer;" onclick="document.getElementById('s-app-password').value='__CLEAR__';document.getElementById('s-app-password').type='text';document.getElementById('s-app-password').placeholder='سيتم إلغاء رمز الحماية عند الحفظ';document.getElementById('s-app-password').readOnly=true;">إلغاء رمز الحماية</div>` : ''}
-
-    ${settings.appPassword ? `
-    <div class="field" style="display:flex;align-items:center;justify-content:space-between;background:var(--surface);border:1.5px solid var(--border);border-radius:10px;padding:12px 14px;margin-bottom:14px;">
-      <div>
-        <div style="font-weight:700;font-size:14px;">👆 فتح ببصمة الإصبع</div>
-        <div style="font-size:11.5px;color:var(--muted);margin-top:2px;">${settings.fingerprintCredentialId ? 'مفعّلة على هذا الجهاز' : 'أسرع من كتابة الرمز كل مرة'}</div>
-      </div>
-      ${settings.fingerprintCredentialId
-        ? `<button class="btn btn-ghost-alert" onclick="disableFingerprint()">إلغاء</button>`
-        : `<button class="btn btn-brass" onclick="enableFingerprint()">تفعيل</button>`}
-    </div>
-    ` : ''}
-
-    ${settings.appPassword ? `
-    <div class="field" style="margin-bottom:14px;">
-      <label>قفل تلقائي بعد عدم الاستخدام</label>
-      <select id="s-autolock">
-        <option value="0" ${settings.autoLockMinutes==0?'selected':''}>بدون (معطّل)</option>
-        <option value="1" ${settings.autoLockMinutes==1?'selected':''}>دقيقة واحدة</option>
-        <option value="5" ${settings.autoLockMinutes==5?'selected':''}>5 دقائق</option>
-        <option value="15" ${settings.autoLockMinutes==15?'selected':''}>15 دقيقة</option>
-        <option value="30" ${settings.autoLockMinutes==30?'selected':''}>30 دقيقة</option>
-      </select>
-    </div>
-    ` : ''}
-
-    ${settings.appPassword ? `
-    <div class="section-title"><span>وصول محدود (لصديقك أو موظفك)</span></div>
-    <div class="row-sub" style="margin-bottom:10px;">رمز دخول منفصل يفتح شاشتي "بيع" و"الطلبيات" فقط — بدون أي وصول للأرباح، المخزون، الإحصائيات، أو باقي البيانات.</div>
-    <div class="field" style="margin-bottom:14px;">
-      <label>كلمة مرور الوصول المحدود ${settings.limitedPassword ? '(مفعّلة حاليًا)' : '(غير مفعّلة)'}</label>
-      <input type="password" id="s-limited-password" placeholder="${settings.limitedPassword ? '•••••• (اتركه فارغًا للإبقاء عليها)' : 'اكتب كلمة مرور للتفعيل'}">
-    </div>
-    ${settings.limitedPassword ? `<div class="row-sub" style="margin-bottom:14px;color:var(--accent-b);cursor:pointer;" onclick="document.getElementById('s-limited-password').value='__CLEAR__';document.getElementById('s-limited-password').type='text';document.getElementById('s-limited-password').placeholder='سيتم إلغاء الوصول المحدود عند الحفظ';document.getElementById('s-limited-password').readOnly=true;">إلغاء الوصول المحدود</div>` : ''}
-    ` : ''}
-
-    <div class="section-title"><span>منطقة الخطر</span></div>
-    <div class="ledger" style="margin-bottom:14px;">
-      <div class="row" style="cursor:pointer;" onclick="openResetData()">
-        <div class="row-main">
-          <div class="row-name" style="color:var(--alert);">🗑 البدء من جديد</div>
-          <div class="row-sub">مسح بيانات التجربة أو كل شيء</div>
-        </div>
-      </div>
-    </div>
-
-    <div class="sheet-actions">
-      <button class="btn btn-brass btn-block" onclick="saveSettingsForm()">حفظ</button>
-    </div>
+    <div class="sheet-actions" style="position:sticky;bottom:0;padding-top:10px;background:linear-gradient(transparent,var(--bg) 25%);"><button class="btn btn-brass btn-block" onclick="saveSettingsForm()">حفظ التغييرات</button></div>
   `;
   openOverlay();
   onHideProfitChange();
 }
-
 async function toggleProfitQuickVisibility(){
   if(!settings.hideProfit){
     settings.hideProfit = true;
