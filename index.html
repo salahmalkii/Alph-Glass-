@@ -1057,6 +1057,31 @@ function normalizeModelStr(s){
   return (s || '').trim().toLowerCase().replace(/[\s\-_]+/g, '');
 }
 
+// بحث مرن في جميع أنحاء التطبيق: يكفي كتابة جزء من اسم المنتج/الموديل.
+// مثال: المنتج "realma c85" يمكن العثور عليه بكتابة "c85" أو "realme" أو "85".
+function searchTextMatches(text, query){
+  const rawText = String(text || '').toLowerCase().trim();
+  const rawQuery = String(query || '').toLowerCase().trim();
+  if(!rawQuery) return true;
+  if(!rawText) return false;
+  if(rawText.includes(rawQuery)) return true;
+  const normalize = v => v
+    .toLowerCase()
+    .replace(/[\u064B-\u065F\u0670]/g,'')
+    .replace(/[أإآٱ]/g,'ا')
+    .replace(/ة/g,'ه')
+    .replace(/ى/g,'ي')
+    .replace(/[^a-z0-9\u0600-\u06FF]+/g,' ');
+  const textN = normalize(rawText);
+  const queryN = normalize(rawQuery);
+  if(textN.includes(queryN)) return true;
+  const compactText = textN.replace(/\s+/g,'');
+  const compactQuery = queryN.replace(/\s+/g,'');
+  if(compactQuery && compactText.includes(compactQuery)) return true;
+  const tokens = queryN.split(/\s+/).filter(Boolean);
+  return tokens.length > 0 && tokens.every(token => textN.split(/\s+/).some(t => t.includes(token)));
+}
+
 function formatPhoneForWhatsApp(phone){
   let digits = (phone || '').replace(/[^0-9]/g, '');
   if(!digits) return '';
@@ -1064,7 +1089,10 @@ function formatPhoneForWhatsApp(phone){
   return digits;
 }
 function isExactModel(model, query){
-  return normalizeModelStr(model) === normalizeModelStr(query);
+  const m = normalizeModelStr(model);
+  const q = normalizeModelStr(query);
+  if(!m || !q) return false;
+  return m === q || searchTextMatches(model, query);
 }
 
 function categoryLabel(p){
@@ -1711,7 +1739,7 @@ function renderInventory(){
 
   let compatMatchInfo = {};
   if(q){
-    const nameMatches = filtered.filter(p=>p.name.toLowerCase().includes(q));
+    const nameMatches = filtered.filter(p=>searchTextMatches(p.name, q));
     const nameMatchIds = new Set(nameMatches.map(p=>p.id));
     const matchingGroups = compatGroups.filter(g=>g.models.some(m=>isExactModel(m, q)));
 
@@ -1858,8 +1886,6 @@ function openProductSheet(id){
         <input type="number" step="0.1" id="f-dim-length" value="${p && p.dimLength ? p.dimLength : ''}" placeholder="الطول mm">
         <input type="number" step="0.1" id="f-dim-width" value="${p && p.dimWidth ? p.dimWidth : ''}" placeholder="العرض mm">
       </div>
-      <button type="button" class="btn btn-outline btn-block" style="margin-top:8px;" onclick="fetchProductDimensionsAuto()">✨ جلب الأبعاد تلقائيًا</button>
-      <div id="f-dim-status" class="row-sub" style="margin-top:6px;">اكتب اسم الهاتف في الأعلى ثم اضغط الزر. سيبحث التطبيق تلقائيًا ويحفظ الأبعاد.</div>
       <div class="row-sub">مثال: 171.9 × 77.8 mm. هذه الأبعاد تستخدم فقط لاقتراح البدائل.</div>
     </div>
     <div class="stat-grid" style="margin-bottom:14px;">
@@ -1890,94 +1916,6 @@ function toggleGlassTypeField(){
   const cat = (document.getElementById('f-cat')?.value || '').trim();
   const wrap = document.getElementById('f-glasstype-wrap');
   if(wrap) wrap.style.display = (cat === 'glass' || cat === 'زجاج حماية') ? '' : 'none';
-}
-
-/* ================= Automatic phone dimensions ================= */
-function cleanPhoneModelQuery(name){
-  let q = String(name || '').trim();
-  q = q.replace(/^(زجاج\s*(حماية|الشاشة)?|glass\s*(protector|tempered\s*glass)?|screen\s*protector)\s*[-_:：]?\s*/i,'');
-  q = q.replace(/\b(زجاج حماية|حماية الشاشة|screen protector|tempered glass)\b/gi,' ');
-  q = q.replace(/\s+/g,' ').trim();
-  return q;
-}
-
-function parseDimensionsFromText(text){
-  if(!text) return null;
-  const t = String(text).replace(/&times;/gi,'×').replace(/&#215;/gi,'×').replace(/×/g,' x ').replace(/[–—−]/g,'-');
-  // Handles common Wikipedia formats such as: 164.0 mm × 75.9 mm × 7.9 mm
-  const re = /(\d{2,3}(?:\.\d+)?)\s*mm\s*[x×*]\s*(\d{2,3}(?:\.\d+)?)\s*mm(?:\s*[x×*]\s*(\d{1,2}(?:\.\d+)?)\s*mm)?/i;
-  let m = t.match(re);
-  if(!m){
-    const re2 = /(\d{2,3}(?:\.\d+)?)\s*[x×*]\s*(\d{2,3}(?:\.\d+)?)(?:\s*[x×*]\s*(\d{1,2}(?:\.\d+)?))?\s*mm/i;
-    m = t.match(re2);
-  }
-  if(!m) return null;
-  const length=Number(m[1]), width=Number(m[2]);
-  if(length<100 || length>300 || width<40 || width>150) return null;
-  return {length,width,thickness:m[3]?Number(m[3]):null};
-}
-
-async function fetchWikipediaDimensions(model){
-  const query = cleanPhoneModelQuery(model);
-  if(!query) return null;
-  const api = 'https://en.wikipedia.org/w/api.php';
-  try{
-    const searchUrl = api + '?action=query&list=search&srsearch=' + encodeURIComponent(query) + '&srlimit=5&format=json&origin=*';
-    const sr = await fetch(searchUrl);
-    if(!sr.ok) return null;
-    const sj = await sr.json();
-    const hits = (sj.query && sj.query.search) || [];
-    for(const hit of hits){
-      const title = hit.title;
-      const pageUrl = api + '?action=query&prop=revisions&rvprop=content&rvslots=main&titles=' + encodeURIComponent(title) + '&format=json&origin=*';
-      const pr = await fetch(pageUrl);
-      if(!pr.ok) continue;
-      const pj = await pr.json();
-      const pages = pj.query && pj.query.pages ? Object.values(pj.query.pages) : [];
-      const content = pages[0]?.revisions?.[0]?.slots?.main?.['*'] || '';
-      if(!content) continue;
-      // Prefer the infobox Dimensions field so unrelated numbers elsewhere on the page are ignored.
-      const dm = content.match(/\|\s*(?:dimensions|dimension)\s*=\s*([^\n|}]+)/i);
-      const d = parseDimensionsFromText(dm ? dm[1] : content);
-      if(d) return {...d, source:'Wikipedia', sourceTitle:title};
-    }
-  }catch(e){ /* Network/API unavailable: caller will show manual fallback. */ }
-  return null;
-}
-
-async function fetchModelDimensionsAuto(model, statusEl, lengthEl, widthEl){
-  const name = String(model || '').trim();
-  if(!name){ if(statusEl) statusEl.textContent='⚠️ اكتب اسم الهاتف أولاً.'; return null; }
-  const existing = getModelDimensions(name);
-  if(existing){
-    if(lengthEl) lengthEl.value=existing.length;
-    if(widthEl) widthEl.value=existing.width;
-    if(statusEl) statusEl.textContent=`✅ الأبعاد موجودة مسبقًا: ${existing.length} × ${existing.width} mm`;
-    return existing;
-  }
-  if(statusEl) statusEl.textContent='⏳ جارٍ البحث عن أبعاد الهاتف تلقائيًا...';
-  const d = await fetchWikipediaDimensions(name);
-  if(!d){
-    if(statusEl) statusEl.textContent='⚠️ لم يتم العثور على الأبعاد تلقائيًا. يمكنك إدخالها يدويًا.';
-    return null;
-  }
-  if(lengthEl) lengthEl.value=d.length;
-  if(widthEl) widthEl.value=d.width;
-  const key=normalizeDimModel(name);
-  compatDimensions[key]={length:d.length,width:d.width,displayName:name,source:d.source,sourceTitle:d.sourceTitle,updatedAt:new Date().toISOString()};
-  await saveCompatDimensions();
-  if(statusEl) statusEl.textContent=`✅ تم جلب ${d.length} × ${d.width} mm تلقائيًا من ${d.source} وحفظها.`;
-  return d;
-}
-
-async function fetchProductDimensionsAuto(){
-  const name=document.getElementById('f-name')?.value?.trim();
-  return fetchModelDimensionsAuto(name, document.getElementById('f-dim-status'), document.getElementById('f-dim-length'), document.getElementById('f-dim-width'));
-}
-
-async function fetchSmartModelDimensionsAuto(){
-  const model=document.getElementById('smartModel')?.value?.trim();
-  return fetchModelDimensionsAuto(model, document.getElementById('smart-dim-status'), document.getElementById('smartLength'), document.getElementById('smartWidth'));
 }
 
 function recalcProductSummary(){
@@ -2094,7 +2032,7 @@ function renderPosCustomerBanner(){
       <div id="posCustSearchResults"></div>
     `;
     if(q){
-      const matches = customers.filter(c=>c.name.includes(q) || (c.phone||'').includes(q)).slice(0,6);
+      const matches = customers.filter(c=>searchTextMatches(c.name, q) || (c.phone||'').includes(q)).slice(0,6);
       const results = document.getElementById('posCustSearchResults');
       if(matches.length === 0){
         results.innerHTML = `<div class="row-sub" style="margin-bottom:14px;">لا يوجد عميل بهذا الاسم</div>`;
@@ -2326,7 +2264,7 @@ function renderPos(){
   const q = (document.getElementById('posSearch')?.value || '').trim().toLowerCase();
   const list = document.getElementById('posList');
   const byFilter = products.filter(p => posFilter==='all' || categoryLabel(p)===posFilter);
-  let filtered = byFilter.filter(p => p.name.toLowerCase().includes(q));
+  let filtered = byFilter.filter(p => searchTextMatches(p.name, q));
   let posCompatMatchInfo = {};
   if(q){
     const nameMatchIds = new Set(filtered.map(p=>p.id));
@@ -3500,7 +3438,7 @@ function renderCustomers(){
     list.innerHTML = `<div class="empty"><span class="big">👤</span>لا يوجد عملاء بعد<div class="hint">اضغط + لإضافة أول عميل وتسجيل ديونه</div></div>`;
     return;
   }
-  let filtered = customers.filter(c=>c.name.includes(q) || (c.phone||'').includes(q));
+  let filtered = customers.filter(c=>searchTextMatches(c.name, q) || (c.phone||'').includes(q));
   if(custTagFilter) filtered = filtered.filter(c=>c.tag===custTagFilter);
   if(filtered.length === 0){
     list.innerHTML = `<div class="empty">لا توجد نتائج</div>`;
@@ -4216,7 +4154,8 @@ function getModelDimensions(model){
   if(!key) return null;
   const d = compatDimensions[key];
   if(d && Number(d.length) > 0 && Number(d.width) > 0) return {length:Number(d.length), width:Number(d.width)};
-  const p = products.find(x => normalizeDimModel(x.name) === key || normalizeDimModel(x.model) === key);
+  const p = products.find(x => normalizeDimModel(x.name) === key || normalizeDimModel(x.model) === key) ||
+            products.find(x => searchTextMatches(x.name, model) || searchTextMatches(x.model, model));
   if(p && Number(p.dimLength) > 0 && Number(p.dimWidth) > 0) return {length:Number(p.dimLength), width:Number(p.dimWidth)};
   return null;
 }
@@ -4261,8 +4200,6 @@ function openSmartCompat(){
         <input type="number" step="0.1" id="smartWidth" placeholder="77.8">
       </div>
     </div>
-    <button type="button" class="btn btn-outline btn-block" style="margin-bottom:8px;" onclick="fetchSmartModelDimensionsAuto()">✨ جلب أبعاد الموديل تلقائيًا</button>
-    <div id="smart-dim-status" class="row-sub" style="margin-bottom:10px;">إذا لم تكن الأبعاد محفوظة، سيبحث التطبيق عنها تلقائيًا.</div>
     <div class="field">
       <label>أقصى فرق مسموح</label>
       <select id="smartTolerance">
@@ -4399,9 +4336,9 @@ function renderCompatGroupsList(){
   if(!list) return;
   const q = (document.getElementById('groupSearch')?.value || '').trim().toLowerCase();
   const filtered = !q ? compatGroups : compatGroups.filter(g=>
-    g.name.toLowerCase().includes(q) ||
-    (g.description||'').toLowerCase().includes(q) ||
-    g.models.some(m=>m.toLowerCase().includes(q))
+    searchTextMatches(g.name, q) ||
+    searchTextMatches(g.description||'', q) ||
+    g.models.some(m=>searchTextMatches(m, q))
   );
   if(filtered.length === 0){
     list.innerHTML = `<div class="empty"><span class="big">🧩</span>${q ? 'لا يوجد موديل مطابق' : 'لا توجد مجموعات بعد'}</div>`;
@@ -4501,8 +4438,8 @@ function renderGlobalSearchResults(){
   const el = document.getElementById('globalSearchResults');
   if(!q){ el.innerHTML = ''; return; }
 
-  const matchedProducts = products.filter(p=>p.name.toLowerCase().includes(qLower)).slice(0,5);
-  const matchedCustomers = customers.filter(c=>c.name.toLowerCase().includes(qLower) || (c.phone||'').includes(q)).slice(0,5);
+  const matchedProducts = products.filter(p=>searchTextMatches(p.name, qLower)).slice(0,5);
+  const matchedCustomers = customers.filter(c=>searchTextMatches(c.name, qLower) || (c.phone||'').includes(q)).slice(0,5);
   const matchedInvoices = invoices.filter(inv=> String(inv.number).includes(q)).slice(0,5);
 
   if(matchedProducts.length===0 && matchedCustomers.length===0 && matchedInvoices.length===0){
@@ -4809,7 +4746,7 @@ function renderLabelProductResults(){
   const el = document.getElementById('labelProductResults');
   if(!q){ el.innerHTML = ''; return; }
 
-  const nameMatches = products.filter(p=>p.name.toLowerCase().includes(q));
+  const nameMatches = products.filter(p=>searchTextMatches(p.name, q));
   const nameMatchIds = new Set(nameMatches.map(p=>p.id));
   const matchingGroups = compatGroups.filter(g=>g.models.some(m=>isExactModel(m, q)));
   const labelCompatInfo = {};
@@ -5689,7 +5626,7 @@ function renderDraftOrderAddResults(orderId){
   const results = document.getElementById('doAddResults');
   if(!results) return;
   if(!q){ results.innerHTML = ''; return; }
-  const matches = products.filter(p=>p.name.toLowerCase().includes(q)).slice(0,6);
+  const matches = products.filter(p=>searchTextMatches(p.name, q)).slice(0,6);
   if(matches.length === 0){
     results.innerHTML = `<div class="row-sub">لا يوجد صنف مطابق</div>`;
     return;
