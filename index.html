@@ -1858,6 +1858,8 @@ function openProductSheet(id){
         <input type="number" step="0.1" id="f-dim-length" value="${p && p.dimLength ? p.dimLength : ''}" placeholder="الطول mm">
         <input type="number" step="0.1" id="f-dim-width" value="${p && p.dimWidth ? p.dimWidth : ''}" placeholder="العرض mm">
       </div>
+      <button type="button" class="btn btn-outline btn-block" style="margin-top:8px;" onclick="fetchProductDimensionsAuto()">✨ جلب الأبعاد تلقائيًا</button>
+      <div id="f-dim-status" class="row-sub" style="margin-top:6px;">اكتب اسم الهاتف في الأعلى ثم اضغط الزر. سيبحث التطبيق تلقائيًا ويحفظ الأبعاد.</div>
       <div class="row-sub">مثال: 171.9 × 77.8 mm. هذه الأبعاد تستخدم فقط لاقتراح البدائل.</div>
     </div>
     <div class="stat-grid" style="margin-bottom:14px;">
@@ -1888,6 +1890,94 @@ function toggleGlassTypeField(){
   const cat = (document.getElementById('f-cat')?.value || '').trim();
   const wrap = document.getElementById('f-glasstype-wrap');
   if(wrap) wrap.style.display = (cat === 'glass' || cat === 'زجاج حماية') ? '' : 'none';
+}
+
+/* ================= Automatic phone dimensions ================= */
+function cleanPhoneModelQuery(name){
+  let q = String(name || '').trim();
+  q = q.replace(/^(زجاج\s*(حماية|الشاشة)?|glass\s*(protector|tempered\s*glass)?|screen\s*protector)\s*[-_:：]?\s*/i,'');
+  q = q.replace(/\b(زجاج حماية|حماية الشاشة|screen protector|tempered glass)\b/gi,' ');
+  q = q.replace(/\s+/g,' ').trim();
+  return q;
+}
+
+function parseDimensionsFromText(text){
+  if(!text) return null;
+  const t = String(text).replace(/&times;/gi,'×').replace(/&#215;/gi,'×').replace(/×/g,' x ').replace(/[–—−]/g,'-');
+  // Handles common Wikipedia formats such as: 164.0 mm × 75.9 mm × 7.9 mm
+  const re = /(\d{2,3}(?:\.\d+)?)\s*mm\s*[x×*]\s*(\d{2,3}(?:\.\d+)?)\s*mm(?:\s*[x×*]\s*(\d{1,2}(?:\.\d+)?)\s*mm)?/i;
+  let m = t.match(re);
+  if(!m){
+    const re2 = /(\d{2,3}(?:\.\d+)?)\s*[x×*]\s*(\d{2,3}(?:\.\d+)?)(?:\s*[x×*]\s*(\d{1,2}(?:\.\d+)?))?\s*mm/i;
+    m = t.match(re2);
+  }
+  if(!m) return null;
+  const length=Number(m[1]), width=Number(m[2]);
+  if(length<100 || length>300 || width<40 || width>150) return null;
+  return {length,width,thickness:m[3]?Number(m[3]):null};
+}
+
+async function fetchWikipediaDimensions(model){
+  const query = cleanPhoneModelQuery(model);
+  if(!query) return null;
+  const api = 'https://en.wikipedia.org/w/api.php';
+  try{
+    const searchUrl = api + '?action=query&list=search&srsearch=' + encodeURIComponent(query) + '&srlimit=5&format=json&origin=*';
+    const sr = await fetch(searchUrl);
+    if(!sr.ok) return null;
+    const sj = await sr.json();
+    const hits = (sj.query && sj.query.search) || [];
+    for(const hit of hits){
+      const title = hit.title;
+      const pageUrl = api + '?action=query&prop=revisions&rvprop=content&rvslots=main&titles=' + encodeURIComponent(title) + '&format=json&origin=*';
+      const pr = await fetch(pageUrl);
+      if(!pr.ok) continue;
+      const pj = await pr.json();
+      const pages = pj.query && pj.query.pages ? Object.values(pj.query.pages) : [];
+      const content = pages[0]?.revisions?.[0]?.slots?.main?.['*'] || '';
+      if(!content) continue;
+      // Prefer the infobox Dimensions field so unrelated numbers elsewhere on the page are ignored.
+      const dm = content.match(/\|\s*(?:dimensions|dimension)\s*=\s*([^\n|}]+)/i);
+      const d = parseDimensionsFromText(dm ? dm[1] : content);
+      if(d) return {...d, source:'Wikipedia', sourceTitle:title};
+    }
+  }catch(e){ /* Network/API unavailable: caller will show manual fallback. */ }
+  return null;
+}
+
+async function fetchModelDimensionsAuto(model, statusEl, lengthEl, widthEl){
+  const name = String(model || '').trim();
+  if(!name){ if(statusEl) statusEl.textContent='⚠️ اكتب اسم الهاتف أولاً.'; return null; }
+  const existing = getModelDimensions(name);
+  if(existing){
+    if(lengthEl) lengthEl.value=existing.length;
+    if(widthEl) widthEl.value=existing.width;
+    if(statusEl) statusEl.textContent=`✅ الأبعاد موجودة مسبقًا: ${existing.length} × ${existing.width} mm`;
+    return existing;
+  }
+  if(statusEl) statusEl.textContent='⏳ جارٍ البحث عن أبعاد الهاتف تلقائيًا...';
+  const d = await fetchWikipediaDimensions(name);
+  if(!d){
+    if(statusEl) statusEl.textContent='⚠️ لم يتم العثور على الأبعاد تلقائيًا. يمكنك إدخالها يدويًا.';
+    return null;
+  }
+  if(lengthEl) lengthEl.value=d.length;
+  if(widthEl) widthEl.value=d.width;
+  const key=normalizeDimModel(name);
+  compatDimensions[key]={length:d.length,width:d.width,displayName:name,source:d.source,sourceTitle:d.sourceTitle,updatedAt:new Date().toISOString()};
+  await saveCompatDimensions();
+  if(statusEl) statusEl.textContent=`✅ تم جلب ${d.length} × ${d.width} mm تلقائيًا من ${d.source} وحفظها.`;
+  return d;
+}
+
+async function fetchProductDimensionsAuto(){
+  const name=document.getElementById('f-name')?.value?.trim();
+  return fetchModelDimensionsAuto(name, document.getElementById('f-dim-status'), document.getElementById('f-dim-length'), document.getElementById('f-dim-width'));
+}
+
+async function fetchSmartModelDimensionsAuto(){
+  const model=document.getElementById('smartModel')?.value?.trim();
+  return fetchModelDimensionsAuto(model, document.getElementById('smart-dim-status'), document.getElementById('smartLength'), document.getElementById('smartWidth'));
 }
 
 function recalcProductSummary(){
@@ -4171,6 +4261,8 @@ function openSmartCompat(){
         <input type="number" step="0.1" id="smartWidth" placeholder="77.8">
       </div>
     </div>
+    <button type="button" class="btn btn-outline btn-block" style="margin-bottom:8px;" onclick="fetchSmartModelDimensionsAuto()">✨ جلب أبعاد الموديل تلقائيًا</button>
+    <div id="smart-dim-status" class="row-sub" style="margin-bottom:10px;">إذا لم تكن الأبعاد محفوظة، سيبحث التطبيق عنها تلقائيًا.</div>
     <div class="field">
       <label>أقصى فرق مسموح</label>
       <select id="smartTolerance">
