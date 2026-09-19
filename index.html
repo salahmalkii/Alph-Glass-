@@ -2017,9 +2017,11 @@ function openProductSheet(id){
       <h3>${p ? 'تعديل الصنف' : 'إضافة صنف جديد'}</h3>
       <button class="icon-btn" onclick="closeOverlay()">✕</button>
     </div>
-    <div class="field">
+    <div class="field" style="position:relative;">
       <label>اسم الصنف</label>
-      <input type="text" id="f-name" value="${p ? escapeHtml(p.name) : ''}" placeholder="مثال: زجاج حماية آيفون 13">
+      <input type="text" id="f-name" autocomplete="off" value="${p ? escapeHtml(p.name) : ''}" placeholder="مثال: اكتب أول حروف اسم الهاتف... Realme C85" oninput="onProductNameInput()" onfocus="onProductNameInput()" onblur="setTimeout(()=>{const el=document.getElementById('fNameSuggest'); if(el) el.style.display='none';},150)">
+      <div id="fNameSuggest" class="ledger" style="display:none;position:absolute;z-index:50;left:0;right:0;top:100%;max-height:260px;overflow:auto;background:var(--surface);border:1.5px solid var(--border);border-radius:10px;box-shadow:0 6px 18px rgba(0,0,0,.15);margin-top:4px;"></div>
+      <div class="row-sub" style="margin-top:4px;">اكتب أول حروف اسم الهاتف واختر من القائمة لملء الشركة والأبعاد تلقائيًا.</div>
     </div>
     <div class="field">
       <label>الفئة (اختر من القائمة أو اكتب فئة جديدة)</label>
@@ -2077,6 +2079,14 @@ function openProductSheet(id){
       <div id="dimFetchStatus" class="row-sub" style="margin-top:7px;">اكتب اسم الهاتف أولاً ثم اضغط على الزر.</div>
       <div class="row-sub">مثال: 171.9 × 77.8 mm. هذه الأبعاد تستخدم فقط لاقتراح البدائل.</div>
     </div>
+    <div class="field">
+      <label>شكل الشاشة</label>
+      <select id="f-curved">
+        <option value="" ${!p || p.curved==null ? 'selected':''}>غير محدد</option>
+        <option value="yes" ${p && p.curved===true ? 'selected':''}>منحنية (Curved)</option>
+        <option value="no" ${p && p.curved===false ? 'selected':''}>مسطحة (Flat)</option>
+      </select>
+    </div>
     <div class="stat-grid" style="margin-bottom:14px;">
       <div class="stat-card">
         <div class="v mono" id="fSummaryCost">0</div>
@@ -2099,6 +2109,79 @@ function openProductSheet(id){
   openOverlay();
   recalcProductSummary();
   toggleGlassTypeField();
+}
+
+// إكمال تلقائي لاسم الهاتف عند إضافة/تعديل صنف: يقترح من قاعدة الأبعاد (اليدوية + المستوردة من الملفات)
+// أسماء تبدأ بما كتبه التاجر، وعند النقر على أحدها يملأ الشركة، الأبعاد، وحالة الانحناء تلقائيًا.
+const PHONE_BRAND_GUESS = {
+  samsung:'Samsung', iphone:'Apple', apple:'Apple', oppo:'Oppo', realme:'Realme',
+  honor:'Honor', redmi:'Redmi', xiaomi:'Xiaomi', poco:'Poco', vivo:'Vivo',
+  infinix:'Infinix', tecno:'Tecno', huawei:'Huawei', oneplus:'OnePlus',
+  google:'Google', motorola:'Motorola', nokia:'Nokia', sony:'Sony',
+  asus:'Asus', zte:'ZTE', lenovo:'Lenovo', nothing:'Nothing'
+};
+function guessBrandFromModelName(name){
+  const first = String(name||'').trim().split(/\s+/)[0] || '';
+  const key = first.toLowerCase().replace(/[^a-z0-9]/g,'');
+  return PHONE_BRAND_GUESS[key] || (first || null);
+}
+
+function onProductNameInput(){
+  const input = document.getElementById('f-name');
+  const box = document.getElementById('fNameSuggest');
+  if(!input || !box) return;
+  const q = input.value.trim().toLowerCase();
+  if(q.length < 2){ box.style.display='none'; box.innerHTML=''; return; }
+  const qTokens = q.split(/\s+/).filter(Boolean);
+  const entries = Object.entries(compatDimensions)
+    .filter(([key,d]) => {
+      if(!d || !d.displayName) return false;
+      const dn = String(d.displayName).toLowerCase();
+      if(dn.includes(q)) return true;
+      // مطابقة مرنة: كل كلمة كتبها التاجر موجودة بمكان ما في اسم الموديل (بأي ترتيب)،
+      // حتى تعمل حتى لو حذف كلمة مثل "Galaxy" أو غيّر ترتيب الكلمات.
+      return qTokens.every(t => dn.includes(t));
+    })
+    .sort((a,b)=>{
+      const an=a[1].displayName.toLowerCase(), bn=b[1].displayName.toLowerCase();
+      const aStarts=an.startsWith(q)?0:1, bStarts=bn.startsWith(q)?0:1;
+      if(aStarts!==bStarts) return aStarts-bStarts;
+      return an.length-bn.length;
+    })
+    .slice(0,8);
+  if(entries.length===0){ box.style.display='none'; box.innerHTML=''; return; }
+  box.innerHTML = entries.map(([key,d])=>`
+    <div class="row" style="cursor:pointer;padding:9px 12px;" onmousedown="selectPhoneSuggestion('${key.replace(/'/g,"\\'")}')">
+      <div class="row-main">
+        <div class="row-name">${escapeHtml(d.displayName)}</div>
+        <div class="row-sub">${d.length} × ${d.width} mm</div>
+      </div>
+    </div>
+  `).join('');
+  box.style.display='';
+}
+
+function selectPhoneSuggestion(key){
+  const d = compatDimensions[key];
+  if(!d) return;
+  const nameEl=document.getElementById('f-name'), brandEl=document.getElementById('f-brand');
+  const lenEl=document.getElementById('f-dim-length'), widEl=document.getElementById('f-dim-width');
+  const curvedEl=document.getElementById('f-curved');
+  if(nameEl) nameEl.value = d.displayName;
+  if(brandEl){
+    const guessed = guessBrandFromModelName(d.displayName);
+    if(guessed) brandEl.value = guessed;
+  }
+  if(lenEl) lenEl.value = d.length;
+  if(widEl) widEl.value = d.width;
+  // حالة الانحناء غير متوفرة في قاعدة الأبعاد الحالية (لا يوجد مصدر موثوق مُجمّع لكل الموديلات بعد)،
+  // فنتركها كما هي إن كانت محددة مسبقًا، أو "غير محدد" ليختارها التاجر بنفسه.
+  if(curvedEl && d.curved!=null){ curvedEl.value = d.curved===true ? 'yes' : 'no'; }
+  const box=document.getElementById('fNameSuggest');
+  if(box){ box.style.display='none'; box.innerHTML=''; }
+  const status=document.getElementById('dimFetchStatus');
+  if(status) status.textContent = '✅ تم ملء الشركة والأبعاد من القائمة — تحقق من "شكل الشاشة" يدويًا إذا لزم.';
+  showToast('تم ملء البيانات، أكمل الكمية والأسعار');
 }
 
 function toggleGlassTypeField(){
@@ -2349,6 +2432,8 @@ async function saveProductForm(){
   const dimWidth = parseFloat(document.getElementById('f-dim-width')?.value);
   const safeDimLength = (!isNaN(dimLength) && dimLength > 0) ? dimLength : null;
   const safeDimWidth = (!isNaN(dimWidth) && dimWidth > 0) ? dimWidth : null;
+  const curvedRaw = document.getElementById('f-curved')?.value || '';
+  const curved = curvedRaw==='yes' ? true : (curvedRaw==='no' ? false : null);
 
   if(!name){ showToast('أدخل اسم الصنف'); return; }
   if(isNaN(buy) || isNaN(sell) || isNaN(qty) || buy<0 || sell<0 || qty<0){
@@ -2362,12 +2447,12 @@ async function saveProductForm(){
     if(p.buyPrice !== buy) logOps.push({ field: 'سعر الشراء', oldValue: p.buyPrice, newValue: buy });
     if(p.sellPrice !== sell) logOps.push({ field: 'سعر البيع', oldValue: p.sellPrice, newValue: sell });
     if(p.qty !== qty) logOps.push({ field: 'الكمية', oldValue: p.qty, newValue: qty });
-    p.name = name; p.buyPrice = buy; p.sellPrice = sell; p.qty = qty; p.category = category; p.compatGroupId = compatGroupId; p.brand = brand; p.glassType = glassType; p.isNew = isNew; p.dimLength = safeDimLength; p.dimWidth = safeDimWidth;
+    p.name = name; p.buyPrice = buy; p.sellPrice = sell; p.qty = qty; p.category = category; p.compatGroupId = compatGroupId; p.brand = brand; p.glassType = glassType; p.isNew = isNew; p.dimLength = safeDimLength; p.dimWidth = safeDimWidth; p.curved = curved;
     logOps.forEach(op=>{
       inventoryLog.unshift({ id: uid(), productId: p.id, productName: name, field: op.field, oldValue: op.oldValue, newValue: op.newValue, date: new Date().toISOString() });
     });
   }else{
-    products.push({ id: uid(), name, buyPrice: buy, sellPrice: sell, qty, category, compatGroupId, brand, glassType, isNew, dimLength: safeDimLength, dimWidth: safeDimWidth });
+    products.push({ id: uid(), name, buyPrice: buy, sellPrice: sell, qty, category, compatGroupId, brand, glassType, isNew, dimLength: safeDimLength, dimWidth: safeDimWidth, curved });
   }
   await saveProducts();
   if(logOps.length > 0) await saveInventoryLog();
