@@ -1910,6 +1910,7 @@ function renderInventory(){
   const brandFilter = document.getElementById('invBrandFilter')?.value || '';
   let filtered = invFilter==='all' ? products : (invFilter==='low' ? products.filter(p=>p.qty<=LOW_STOCK_THRESHOLD) : products.filter(p=>categoryLabel(p)===invFilter));
   if(brandFilter) filtered = filtered.filter(p=>p.brand===brandFilter);
+  const invBasePool = filtered;
 
   let compatMatchInfo = {};
   if(q){
@@ -1945,6 +1946,17 @@ function renderInventory(){
     filtered = [...nameMatches, ...groupMatches];
   }
 
+  // إذا لم يُعثر على الصنف بالاسم ولا عبر مجموعات التوافق، اقترح تلقائياً من المخزون
+  // ما يقارب أبعاده أبعاد الهاتف المطلوب (باستخدام قاعدة الأبعاد المحفوظة/المستوردة).
+  let invSmartMatchInfo = {};
+  if(q && filtered.length === 0){
+    const smart = findSmartDimensionMatches(q, invBasePool);
+    if(smart.length){
+      smart.forEach(x=>invSmartMatchInfo[x.p.id]=x.d);
+      filtered = smart.map(x=>x.p).slice(0,20);
+    }
+  }
+
   const sortBy = document.getElementById('invSortBy')?.value || 'name-asc';
   filtered = [...filtered].sort((a,b)=>{
     switch(sortBy){
@@ -1977,6 +1989,7 @@ function renderInventory(){
         ${p.glassType ? `<span class="cat-badge glass" style="margin-right:4px;">${escapeHtml(glassTypeLabel[p.glassType] || p.glassType)}</span>` : ''}
         ${grp ? `<span class="cat-badge other" style="margin-right:4px;">🧩 ${escapeHtml(grp.name)}</span>` : ''}
         ${compatMatchInfo[p.id] ? `<div class="row-sub" style="color:var(--accent-b);margin-top:4px;">🧩 متوافق مع "${escapeHtml(compatMatchInfo[p.id])}" اللي بحثت عنه</div>` : ''}
+        ${invSmartMatchInfo[p.id] ? smartDimBadgeHtml(invSmartMatchInfo[p.id]) : ''}
       </div>
       <div class="qty-pill ${low?'low':''}">${p.qty} قطعة</div>
       <div class="price-col">
@@ -4643,6 +4656,28 @@ function dimensionDistance(a,b){
   return {dl,dw,score};
 }
 
+// بحث موحّد عن بدائل من المخزون حسب الأبعاد — يُستخدم في كل شاشات البحث بالتطبيق
+// (المخزون، البحث الشامل، طباعة الملصق، إضافة صنف للطلبية...) حتى لا يتكرر نفس المنطق.
+// يعتمد على قاعدة الأبعاد compatDimensions (اليدوية + المستوردة) للتعرف على أبعاد الهاتف المطلوب،
+// ثم يقارنها بأبعاد كل صنف متوفر فعليًا في المخزون (qty>0) ويرتّب الأقرب أولاً.
+function findSmartDimensionMatches(query, pool, tolerance=1){
+  const q = String(query||'').trim();
+  if(!q) return [];
+  const target = getModelDimensions(q);
+  if(!target) return [];
+  return (pool||[])
+    .filter(p=>Number(p.qty)>0)
+    .map(p=>({p, d: dimensionDistance(target, getModelDimensions(p.name))}))
+    .filter(x=>x.d && x.d.dl<=tolerance && x.d.dw<=tolerance)
+    .sort((a,b)=>a.d.score-b.d.score);
+}
+
+function smartDimBadgeHtml(d){
+  if(!d) return '';
+  const g = dimensionGrade(d);
+  return `<div class="row-sub" style="color:var(--accent-b);margin-top:2px;">📐 قريب من حيث الأبعاد (${g.label}) — فرق ${d.dl.toFixed(1)}×${d.dw.toFixed(1)} مم</div>`;
+}
+
 function dimensionGrade(d){
   if(!d) return {label:'بدون أبعاد', cls:''};
   const max = Math.max(d.dl,d.dw);
@@ -4958,9 +4993,19 @@ function renderGlobalSearchResults(){
   const el = document.getElementById('globalSearchResults');
   if(!q){ el.innerHTML = ''; return; }
 
-  const matchedProducts = products.filter(p=>searchTextMatches(p.name, qLower)).slice(0,5);
+  let matchedProducts = products.filter(p=>searchTextMatches(p.name, qLower)).slice(0,5);
   const matchedCustomers = customers.filter(c=>searchTextMatches(c.name, qLower) || (c.phone||'').includes(q)).slice(0,5);
   const matchedInvoices = invoices.filter(inv=> String(inv.number).includes(q)).slice(0,5);
+
+  // لا صنف بهذا الاسم؟ اقترح تلقائياً أصنافاً من المخزون بأبعاد قريبة من الهاتف المطلوب.
+  let globalSmartMatchInfo = {};
+  if(matchedProducts.length === 0){
+    const smart = findSmartDimensionMatches(q, products).slice(0,5);
+    if(smart.length){
+      smart.forEach(x=>globalSmartMatchInfo[x.p.id]=x.d);
+      matchedProducts = smart.map(x=>x.p);
+    }
+  }
 
   if(matchedProducts.length===0 && matchedCustomers.length===0 && matchedInvoices.length===0){
     el.innerHTML = `<div class="empty" style="padding:20px;">لا توجد نتائج</div>`;
@@ -4975,6 +5020,7 @@ function renderGlobalSearchResults(){
         <div class="row-main">
           <div class="row-name">${escapeHtml(p.name)}</div>
           <div class="row-sub">متوفر: ${p.qty} — ${plainNum(p.sellPrice)} ${settings.currency}</div>
+          ${globalSmartMatchInfo[p.id] ? smartDimBadgeHtml(globalSmartMatchInfo[p.id]) : ''}
         </div>
       </div>`).join('');
     html += `</div>`;
@@ -6147,7 +6193,15 @@ function renderDraftOrderAddResults(orderId){
   const results = document.getElementById('doAddResults');
   if(!results) return;
   if(!q){ results.innerHTML = ''; return; }
-  const matches = products.filter(p=>searchTextMatches(p.name, q)).slice(0,6);
+  let matches = products.filter(p=>searchTextMatches(p.name, q)).slice(0,6);
+  let doSmartMatchInfo = {};
+  if(matches.length === 0){
+    const smart = findSmartDimensionMatches(q, products).slice(0,6);
+    if(smart.length){
+      smart.forEach(x=>doSmartMatchInfo[x.p.id]=x.d);
+      matches = smart.map(x=>x.p);
+    }
+  }
   if(matches.length === 0){
     results.innerHTML = `<div class="row-sub">لا يوجد صنف مطابق</div>`;
     return;
@@ -6157,6 +6211,7 @@ function renderDraftOrderAddResults(orderId){
       <div class="row-main">
         <div class="row-name">${escapeHtml(p.name)}</div>
         <div class="row-sub mono">${plainNum(p.sellPrice)} ${settings.currency} · متوفر ${p.qty}</div>
+        ${doSmartMatchInfo[p.id] ? smartDimBadgeHtml(doSmartMatchInfo[p.id]) : ''}
       </div>
     </div>
   `).join('')}</div>`;
