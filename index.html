@@ -2217,6 +2217,26 @@ async function fetchPhoneDimensions(){
   try{
     let found=local[key]||null;
 
+    // 0) قاعدة الأبعاد الداخلية (compatDimensions) — تشمل كل ما أدخلته يدويًا وكل ملفات الاستيراد
+    // (مثل ملفات سامسونج/أوبو/ريلمي...) وكل بحث ناجح سابق. أهم مصدر لأنه فوري ولا يحتاج إنترنت،
+    // ويُبحث فيه أولاً قبل أي شيء آخر حتى لا نطلب من الإنترنت شيئًا موجودًا عندنا أصلاً.
+    if(!found){
+      const exact=compatDimensions[key];
+      if(exact && Number(exact.length)>0 && Number(exact.width)>0){
+        found=[Number(exact.length),Number(exact.width)];
+      }
+    }
+    if(!found){
+      let best=null,bestScore=-Infinity;
+      for(const d of Object.values(compatDimensions)){
+        const sc=nameScore(d && d.displayName);
+        if(sc>bestScore){bestScore=sc;best=d;}
+      }
+      if(best && bestScore>=100 && Number(best.length)>0 && Number(best.width)>0){
+        found=[Number(best.length),Number(best.width)];
+      }
+    }
+
     // 1) GSMArena — عبر أداة كشط غير رسمية تابعة لطرف ثالث (GSMArena نفسه لا يوفّر واجهة برمجية رسمية).
     // نجرّب أولاً نقطة الوصول الشاملة /phone?name=، وإن لم تنجح نبحث بـ/search ثم نجلب صفحة الجهاز بمعرّفه (slug).
     if(!found){
