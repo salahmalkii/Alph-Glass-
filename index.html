@@ -4726,6 +4726,20 @@ function getModelDimensions(model){
   if(!key) return null;
   const d = compatDimensions[key];
   if(d && Number(d.length) > 0 && Number(d.width) > 0) return {length:Number(d.length), width:Number(d.width)};
+
+  // مطابقة مرنة داخل قاعدة الأبعاد: يكفي كتابة جزء من اسم الموديل (مثال: "a60" بدل "Oppo A60")،
+  // بشرط أن يكون الجزء المكتوب كلمة كاملة ضمن الاسم (وليس مجرد جزء من رقم آخر مثل A605 أو A600).
+  // عند وجود أكثر من تطابق نختار الاسم الأقصر (الأكثر تحديدًا/الأقرب لما كتبه التاجر).
+  let fuzzy = null, fuzzyLen = Infinity;
+  for(const dd of Object.values(compatDimensions)){
+    if(!dd || !dd.displayName) continue;
+    if(!(Number(dd.length) > 0 && Number(dd.width) > 0)) continue;
+    if(matchesModel(dd.displayName, model) && dd.displayName.length < fuzzyLen){
+      fuzzy = dd; fuzzyLen = dd.displayName.length;
+    }
+  }
+  if(fuzzy) return {length:Number(fuzzy.length), width:Number(fuzzy.width)};
+
   const p = products.find(x => normalizeDimModel(x.name) === key || normalizeDimModel(x.model) === key) ||
             products.find(x => searchTextMatches(x.name, model) || searchTextMatches(x.model, model));
   if(p && Number(p.dimLength) > 0 && Number(p.dimWidth) > 0) return {length:Number(p.dimLength), width:Number(p.dimWidth)};
