@@ -4744,9 +4744,55 @@ function openCompatDimensions(){
       <div class="field"><label>العرض mm</label><input type="number" step="0.1" id="dimWidth"></div>
     </div>
     <button class="btn btn-brass btn-block" onclick="saveModelDimension()">حفظ الأبعاد</button>
+    <button class="btn btn-outline btn-block" style="margin-top:8px;" onclick="document.getElementById('dimImportFileInput').click()">⬆ استيراد قاعدة أبعاد (ملف)</button>
+    <input type="file" id="dimImportFileInput" accept="application/json" style="display:none;" onchange="importDimensionsFile(event)">
+    <div class="row-sub" style="margin-top:6px;">هذا الاستيراد يضيف/يحدّث الأبعاد فقط، ولا يمسّ منتجاتك أو فواتيرك أو أي بيانات أخرى.</div>
     <div style="margin-top:14px;" class="ledger">${rows.length?rows.map(x=>`<div class="row"><div class="row-main"><div class="row-name">${escapeHtml(x.key)}</div><div class="row-sub">${x.d.length} × ${x.d.width} mm</div></div><button class="icon-btn" onclick="deleteModelDimension('${x.key}')">🗑</button></div>`).join(''):'<div class="empty">لا توجد أبعاد محفوظة بعد</div>'}</div>
   `;
   openOverlay();
+}
+
+async function importDimensionsFile(event){
+  const file = event.target.files && event.target.files[0];
+  event.target.value = '';
+  if(!file) return;
+  try{
+    const text = await file.text();
+    const data = JSON.parse(text);
+    // نقبل صيغتين: {items:[{name,length,width}, ...]} أو كائن مباشر {key:{length,width,displayName}}
+    let items = [];
+    if(data && Array.isArray(data.items)){
+      items = data.items;
+    }else if(data && typeof data === 'object' && !Array.isArray(data)){
+      items = Object.entries(data).map(([name, d]) => ({
+        name: (d && d.displayName) || name,
+        length: d && d.length,
+        width: d && d.width
+      }));
+    }else if(Array.isArray(data)){
+      items = data;
+    }
+    let added = 0, updated = 0, skipped = 0;
+    for(const it of items){
+      const name = it && (it.name || it.displayName);
+      const length = parseFloat(it && it.length);
+      const width = parseFloat(it && it.width);
+      if(!name || isNaN(length) || isNaN(width) || length<=0 || width<=0){ skipped++; continue; }
+      const key = normalizeDimModel(name);
+      if(!key){ skipped++; continue; }
+      if(compatDimensions[key]) updated++; else added++;
+      compatDimensions[key] = {length, width, displayName: String(name)};
+    }
+    if(added===0 && updated===0){
+      showToast('لم يتم العثور على بيانات أبعاد صالحة في الملف');
+      return;
+    }
+    await saveCompatDimensions();
+    openCompatDimensions();
+    showToast(`تم الاستيراد: ${added} جديد، ${updated} محدَّث${skipped?`، ${skipped} تم تجاهله`:''}`);
+  }catch(e){
+    showToast('تعذّرت قراءة الملف — تأكد أنه ملف أبعاد صالح (JSON)');
+  }
 }
 
 async function saveModelDimension(){
