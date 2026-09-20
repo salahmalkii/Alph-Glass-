@@ -1072,7 +1072,7 @@ let products = [];
 let invoices = [];
 let customers = [];
 let customerTx = [];
-let settings = { shopName: "Alpha Glass", currency: "ر.س", hideProfit: false, profitPin: "", shopPhone: "", appPassword: "", fingerprintCredentialId: "", friendPhone: "", autoLockMinutes: 0, limitedPassword: "", homeTiles: ['sell','inventory','invoices','customers','orders','debts'], thermalPaperWidth: "58mm", pt210FontSize: 42, pt210Align: "center", pt210Offset: 0, pt210Bold: true, expenseCategories: [] };
+let settings = { shopName: "Alpha Glass", currency: "ر.س", hideProfit: false, profitPin: "", shopPhone: "", appPassword: "", fingerprintCredentialId: "", friendPhone: "", autoLockMinutes: 0, limitedPassword: "", homeTiles: ['sell','inventory','invoices','customers','orders','debts'], thermalPaperWidth: "58mm", pt210FontSize: 42, pt210Align: "center", pt210Offset: 0, pt210Bold: true, pt210LabelWidthMm: 40, pt210LabelHeightMm: 20, pt210LabelGapMm: 0, pt210LabelFontSize: 54, pt210LabelAlign: "center", pt210LabelOffset: 0, pt210LabelBold: true, expenseCategories: [] };
 let cart = {}; // productId -> qty
 let cartDisplayName = {}; // productId -> alternate name to sell/print under (from a compat group)
 let cartOverride = {}; // productId -> edited price for current checkout
@@ -6131,6 +6131,11 @@ async function savePT210PrintSettings(){
   const alEl=document.getElementById('pt210-align');
   const offEl=document.getElementById('pt210-offset');
   const boldEl=document.getElementById('pt210-bold');
+  const lfsEl=document.getElementById('pt210-label-font-size');
+  const lalEl=document.getElementById('pt210-label-align');
+  const loffEl=document.getElementById('pt210-label-offset');
+  const lgapEl=document.getElementById('pt210-label-gap');
+  const lboldEl=document.getElementById('pt210-label-bold');
   let fs=parseInt(fsEl?.value,10);
   if(!Number.isFinite(fs)) fs=42;
   settings.pt210FontSize=Math.max(16,Math.min(72,fs));
@@ -6139,6 +6144,14 @@ async function savePT210PrintSettings(){
   if(!Number.isFinite(off)) off=0;
   settings.pt210Offset=Math.max(-120,Math.min(120,off));
   settings.pt210Bold=!!boldEl?.checked;
+  let lfs=parseInt(lfsEl?.value,10); if(!Number.isFinite(lfs)) lfs=54;
+  settings.pt210LabelFontSize=Math.max(20,Math.min(72,lfs));
+  settings.pt210LabelAlign=['left','center','right'].includes(lalEl?.value) ? lalEl.value : 'center';
+  let loff=parseInt(loffEl?.value,10); if(!Number.isFinite(loff)) loff=0;
+  settings.pt210LabelOffset=Math.max(-100,Math.min(100,loff));
+  let lgap=parseFloat(lgapEl?.value); if(!Number.isFinite(lgap)) lgap=0;
+  settings.pt210LabelGapMm=Math.max(0,Math.min(10,lgap));
+  settings.pt210LabelBold=!!lboldEl?.checked;
   await saveSettings();
   showToast('تم حفظ إعدادات الطباعة');
 }
@@ -6156,10 +6169,92 @@ function openPT210Settings(){
       <div class="field"><label>تحريك أفقي</label><input type="range" id="pt210-offset" min="-120" max="120" step="1" value="${Number(settings.pt210Offset||0)}" oninput="document.getElementById('pt210-offset-value').textContent=this.value"></div>
       <div class="row-sub" style="text-align:center;margin-top:-4px;">الإزاحة: <b id="pt210-offset-value">${Number(settings.pt210Offset||0)}</b> px — السالب لليسار والموجب لليمين</div>
       <div class="settings-toggle-row" style="margin-top:10px;"><div><b>خط عريض</b><small>تكبير سماكة الكتابة</small></div><input type="checkbox" id="pt210-bold" ${settings.pt210Bold!==false?'checked':''}></div>
+      <div style="margin-top:16px;padding-top:14px;border-top:1px solid var(--line);">
+        <div class="row-name">🏷️ إعدادات الملصق 40×20 مم</div>
+        <div class="row-sub" style="margin-top:5px;">كل اسم سيُطبع كملصق مستقل بارتفاع 20 مم، وليس كورقة طويلة. الملصق 40 مم يتم توسيطه داخل عرض الطابعة.</div>
+        <div class="field" style="margin-top:10px;"><label>حجم خط الملصق <span>• 20 إلى 72</span></label><input type="number" id="pt210-label-font-size" min="20" max="72" step="1" value="${Number(settings.pt210LabelFontSize||54)}"></div>
+        <div class="field"><label>محاذاة الملصق</label><select id="pt210-label-align"><option value="right" ${settings.pt210LabelAlign==='right'?'selected':''}>يمين</option><option value="center" ${(!settings.pt210LabelAlign||settings.pt210LabelAlign==='center')?'selected':''}>وسط</option><option value="left" ${settings.pt210LabelAlign==='left'?'selected':''}>يسار</option></select></div>
+        <div class="field"><label>تحريك أفقي للملصق</label><input type="range" id="pt210-label-offset" min="-100" max="100" step="1" value="${Number(settings.pt210LabelOffset||0)}" oninput="document.getElementById('pt210-label-offset-value').textContent=this.value"></div>
+        <div class="row-sub" style="text-align:center;margin-top:-4px;">الإزاحة: <b id="pt210-label-offset-value">${Number(settings.pt210LabelOffset||0)}</b> px</div>
+        <div class="field"><label>الفاصل بين الملصقات (مم)</label><input type="number" id="pt210-label-gap" min="0" max="10" step="0.5" value="${Number(settings.pt210LabelGapMm||0)}"><div class="row-sub">إذا كانت الملصقات متلاصقة اتركه 0، وإذا يوجد فراغ أدخل قياسه.</div></div>
+        <div class="settings-toggle-row"><div><b>خط عريض للملصق</b><small>يجعل اسم الهاتف أوضح</small></div><input type="checkbox" id="pt210-label-bold" ${settings.pt210LabelBold!==false?'checked':''}></div>
+      </div>
       <button class="btn btn-outline btn-block" style="margin-top:12px;" onclick="savePT210PrintSettings()">💾 حفظ إعدادات الطباعة</button>
       <button class="btn btn-outline btn-block" style="margin-top:8px;" onclick="savePT210PrintSettings();printPT210Text('اختبار Alpha Glass\\nGOOJPRT PT-210',1,{fontSize:Number(settings.pt210FontSize||42),align:settings.pt210Align,offset:Number(settings.pt210Offset||0),bold:settings.pt210Bold})">🧪 اختبار الطباعة</button>
+      <button class="btn btn-brass btn-block" style="margin-top:8px;" onclick="savePT210PrintSettings();printPT210Label('Oppo A1K',1,{fontSize:Number(settings.pt210LabelFontSize||54),align:settings.pt210LabelAlign,offset:Number(settings.pt210LabelOffset||0),bold:settings.pt210LabelBold!==false,gapMm:Number(settings.pt210LabelGapMm||0)})">🏷️ اختبار ملصق 40×20</button>
     </div>`;
   openOverlay();
+}
+
+function pt210LabelCanvasForText(text, opts={}){
+  const paperWidth = PT210_PAPER_PX;
+  const labelWidth = Math.round(Number(settings.pt210LabelWidthMm || 40) * 8);
+  const labelHeight = Math.round(Number(settings.pt210LabelHeightMm || 20) * 8);
+  const labelLeft = Math.max(0, Math.round((paperWidth - labelWidth) / 2));
+  const padding = 10;
+  let fontSize = Math.max(20, Math.min(72, Number(opts.fontSize ?? settings.pt210LabelFontSize ?? 54)));
+  const align = ['left','center','right'].includes(opts.align) ? opts.align : (['left','center','right'].includes(settings.pt210LabelAlign) ? settings.pt210LabelAlign : 'center');
+  const offset = Math.max(-100, Math.min(100, Number(opts.offset ?? settings.pt210LabelOffset ?? 0)));
+  const bold = opts.bold !== undefined ? !!opts.bold : settings.pt210LabelBold !== false;
+  const maxTextWidth = Math.max(40, labelWidth - padding*2);
+  const rawLines = String(text ?? '').split('\\n');
+  function makeLines(size){
+    const c=document.createElement('canvas').getContext('2d');
+    c.font=`${bold?'bold ':''}${size}px Arial, Tahoma, sans-serif`;
+    const out=[];
+    for(const raw of rawLines){
+      if(!raw){ out.push(''); continue; }
+      let current='';
+      for(const part of String(raw).split(/(\\s+)/)){
+        const test=current+part;
+        if(current && c.measureText(test).width>maxTextWidth){ out.push(current.trimEnd()); current=part.trimStart(); }
+        else current=test;
+      }
+      if(current || !out.length) out.push(current.trimEnd());
+    }
+    return out;
+  }
+  let lines=makeLines(fontSize);
+  while(lines.length>2 && fontSize>24){ fontSize-=2; lines=makeLines(fontSize); }
+  if(lines.length>2) lines=lines.slice(0,2);
+  const m=document.createElement('canvas').getContext('2d');
+  while(fontSize>24){
+    m.font=`${bold?'bold ':''}${fontSize}px Arial, Tahoma, sans-serif`;
+    if(lines.every(l=>m.measureText(l).width<=maxTextWidth)) break;
+    fontSize-=2; lines=makeLines(fontSize); if(lines.length>2) lines=lines.slice(0,2);
+  }
+  const lineHeight=Math.round(fontSize*1.08);
+  const canvas=document.createElement('canvas');
+  canvas.width=paperWidth; canvas.height=labelHeight;
+  const ctx=canvas.getContext('2d',{willReadFrequently:true});
+  ctx.fillStyle='#fff'; ctx.fillRect(0,0,canvas.width,canvas.height);
+  ctx.fillStyle='#000'; ctx.textBaseline='middle'; ctx.textAlign=align;
+  ctx.direction=/[\\u0600-\\u06FF]/.test(lines.join(''))?'rtl':'ltr';
+  ctx.font=`${bold?'bold ':''}${fontSize}px Arial, Tahoma, sans-serif`;
+  const baseX=align==='left'?labelLeft+padding:align==='right'?labelLeft+labelWidth-padding:labelLeft+labelWidth/2;
+  const x=Math.max(labelLeft+padding,Math.min(labelLeft+labelWidth-padding,baseX+offset));
+  const totalH=lines.length*lineHeight;
+  const startY=(labelHeight-totalH)/2+lineHeight/2;
+  lines.forEach((line,i)=>ctx.fillText(line,x,startY+i*lineHeight));
+  return canvas;
+}
+
+async function printPT210Label(text, copies=1, opts={}){
+  if(!pt210Supported()){ showToast('افتح Alpha Glass من Chrome عبر HTTPS لتفعيل Bluetooth'); return false; }
+  if(!pt210WriteCharacteristic || !pt210Device?.gatt?.connected){ const ok=await connectPT210(); if(!ok) return false; }
+  const safeCopies=Math.max(1,Math.min(200,Number(copies)||1));
+  const canvas=pt210LabelCanvasForText(text,opts);
+  const {raster,widthBytes,height}=pt210CanvasRaster(canvas);
+  const gapMm=Math.max(0,Math.min(10,Number(opts.gapMm ?? settings.pt210LabelGapMm ?? 0)));
+  const gapDots=Math.round(gapMm*8);
+  try{
+    for(let copy=0;copy<safeCopies;copy++){
+      await pt210Write(pt210EscPosInit()); await pt210Delay(25);
+      await pt210Write(pt210RasterCommand(raster,widthBytes,height)); await pt210Delay(100);
+      if(gapDots>0){ await pt210Write(new Uint8Array([0x1b,0x4a,Math.min(255,gapDots)])); await pt210Delay(60); }
+    }
+    showToast('تمت طباعة الملصق 40×20 مم'); return true;
+  }catch(err){ pt210WriteCharacteristic=null; showToast('تعذر إرسال الملصق إلى PT-210'); return false; }
 }
 
 function printProductLabels(productId, labelName){
@@ -6171,7 +6266,7 @@ function printProductLabels(productId, labelName){
   if(qty > 200) qty = 200;
 
   if(pt210Supported()) {
-    printPT210Text(name, qty, {fontSize:Math.max(16, Math.min(72, Number(settings.pt210FontSize || 42)))});
+    printPT210Label(name, qty, {fontSize:Math.max(20, Math.min(72, Number(settings.pt210LabelFontSize || 54))),align:settings.pt210LabelAlign,offset:Number(settings.pt210LabelOffset||0),bold:settings.pt210LabelBold!==false,gapMm:Number(settings.pt210LabelGapMm||0)});
     return;
   }
   const grid = document.getElementById('labelGridContent');
@@ -6197,7 +6292,7 @@ function printCartLabels(){
       const ok=await connectPT210();
       if(!ok) return;
       for(const name of labels) {
-        const done=await printPT210Text(name,1,{fontSize:Math.max(16, Math.min(72, Number(settings.pt210FontSize || 42)))});
+        const done=await printPT210Label(name,1,{fontSize:Math.max(20, Math.min(72, Number(settings.pt210LabelFontSize || 54))),align:settings.pt210LabelAlign,offset:Number(settings.pt210LabelOffset||0),bold:settings.pt210LabelBold!==false,gapMm:Number(settings.pt210LabelGapMm||0)});
         if(!done) break;
       }
     })();
