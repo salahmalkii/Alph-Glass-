@@ -1072,7 +1072,7 @@ let products = [];
 let invoices = [];
 let customers = [];
 let customerTx = [];
-let settings = { shopName: "Alpha Glass", currency: "ر.س", hideProfit: false, profitPin: "", shopPhone: "", appPassword: "", fingerprintCredentialId: "", friendPhone: "", autoLockMinutes: 0, limitedPassword: "", homeTiles: ['sell','inventory','invoices','customers','orders','debts'] };
+let settings = { shopName: "Alpha Glass", currency: "ر.س", hideProfit: false, profitPin: "", shopPhone: "", appPassword: "", fingerprintCredentialId: "", friendPhone: "", autoLockMinutes: 0, limitedPassword: "", homeTiles: ['sell','inventory','invoices','customers','orders','debts'], thermalPaperWidth: "58mm" };
 let cart = {}; // productId -> qty
 let cartDisplayName = {}; // productId -> alternate name to sell/print under (from a compat group)
 let cartOverride = {}; // productId -> edited price for current checkout
@@ -1238,6 +1238,7 @@ async function loadAll(){
   }catch(e){ loginLog = []; }
   seedDefaultGroups();
   storageReady = true;
+  applyThermalPrintStyle();
 
   const icon = document.getElementById('lockScreenIcon');
   const headerIcon = document.querySelector('.brand-icon');
@@ -3603,6 +3604,47 @@ function shareInvoiceWhatsApp(inv){
   window.open(url, '_blank');
 }
 
+/* ===== طباعة على طابعة حرارية (نفس الطابعة للفاتورة والملصقات، بتغيير عرض الورق حسب اللف المستخدم) ===== */
+function applyThermalPrintStyle(){
+  const width = (settings.thermalPaperWidth === '80mm') ? '80mm' : '58mm';
+  let styleEl = document.getElementById('thermalPrintStyle');
+  if(!styleEl){
+    styleEl = document.createElement('style');
+    styleEl.id = 'thermalPrintStyle';
+    document.head.appendChild(styleEl);
+  }
+  styleEl.textContent = `
+    @media print{
+      @page{ size: ${width} auto; margin: 0mm; }
+      html, body{ width:${width}; }
+      #invoiceView{ width:${width} !important; }
+      .receipt{
+        max-width:${width} !important;
+        width:${width} !important;
+        margin:0 !important;
+        padding:6px 6px !important;
+        border:none !important;
+        box-sizing:border-box;
+      }
+      #labelPrintView{ width:${width} !important; padding:0 !important; }
+      .label-grid{
+        display:block !important;
+        width:${width} !important;
+      }
+      .label-box{
+        width:100% !important;
+        box-sizing:border-box;
+        border:none !important;
+        border-bottom:1px dashed #999 !important;
+        border-radius:0 !important;
+        padding:12px 4px !important;
+        font-size:17px !important;
+        page-break-inside:avoid;
+      }
+    }
+  `;
+}
+
 function printInvoice(inv){
   const d = new Date(inv.date);
   const dateStr = d.toLocaleDateString('ar') + ' - ' + d.toLocaleTimeString('ar', {hour:'2-digit', minute:'2-digit'});
@@ -5885,14 +5927,21 @@ async function performReset(level){
 
 function openBackup(){
   const sheet = document.getElementById('sheetContent');
+  const canShareFiles = !!(navigator.canShare && navigator.share);
   sheet.innerHTML = `
     <div class="sheet-head">
       <h3>نسخة احتياطية</h3>
       <button class="icon-btn" onclick="closeOverlay()">✕</button>
     </div>
-    <div class="row-sub" style="margin-bottom:16px;">احفظ نسخة من كل بياناتك (المخزون، الفواتير، العملاء، المصاريف) كملف، أو استرجعها لاحقًا على جهاز آخر.</div>
+    <div class="row-sub" style="margin-bottom:8px;">احفظ نسخة من كل بياناتك (المخزون، الفواتير، العملاء، المصاريف) كملف، أو استرجعها لاحقًا على جهاز آخر.</div>
+    <div class="row-sub" style="margin-bottom:16px;color:var(--alert);">⚠️ مهم: زر "تصدير" ينزّل الملف داخل نفس الهاتف — إذا سُرق الهاتف أو تعطّل، هذا الملف يضيع معه هو الآخر! لحماية حقيقية، لازم ترسل نسخة الملف لمكان خارج الهاتف (واتساب، إيميل، Google Drive...) بشكل دوري.</div>
+    <div class="row-sub" style="margin-bottom:16px;">📁 تلقائيًا مع Google Drive: من إعدادات تطبيق Google Drive على هاتفك فعّل "نسخ احتياطي واستعادة" لمجلد التنزيلات (Downloads) — وبعدها كل ملف تصدّره بزر "تصدير" يرفع لقوقل درايف تلقائيًا بدون ما تسوي شيء إضافي.</div>
     <div class="sheet-actions" style="margin-bottom:10px;">
-      <button class="btn btn-brass btn-block" onclick="exportBackup()">⬇ تصدير نسخة احتياطية</button>
+      <button class="btn btn-brass btn-block" onclick="shareBackupFile()">📤 إرسال نسخة احتياطية لمكان آمن (واتساب / إيميل / درايف)</button>
+    </div>
+    ${!canShareFiles ? `<div class="row-sub" style="margin-bottom:10px;">(المشاركة المباشرة غير مدعومة على هذا المتصفح — استعمل "تصدير" ثم أرسل الملف يدويًا من مجلد التنزيلات)</div>` : ''}
+    <div class="sheet-actions" style="margin-bottom:10px;">
+      <button class="btn btn-outline btn-block" onclick="exportBackup()">⬇ تصدير نسخة احتياطية (تنزيل محلي فقط)</button>
     </div>
     <div class="sheet-actions" style="margin-bottom:10px;">
       <button class="btn btn-outline btn-block" onclick="document.getElementById('importFileInput').click()">⬆ استيراد نسخة احتياطية</button>
@@ -5901,6 +5950,31 @@ function openBackup(){
     <div class="row-sub" style="color:var(--alert);">تحذير: الاستيراد يستبدل كل البيانات الحالية بما في الملف.</div>
   `;
   openOverlay();
+}
+
+async function shareBackupFile(){
+  try{
+    const data = {
+      exportedAt: new Date().toISOString(),
+      products, invoices, customers, customerTx, draftOrders, expenses, settings, suppliers, supplierTx, inventoryLog, compatGroups, compatDimensions
+    };
+    const filename = 'نسخة-احتياطية-' + todayStr() + '.json';
+    const file = new File([JSON.stringify(data, null, 2)], filename, { type: 'application/json' });
+    if(navigator.canShare && navigator.canShare({ files: [file] })){
+      await navigator.share({
+        files: [file],
+        title: 'نسخة احتياطية — ' + (settings.shopName || 'المتجر'),
+        text: 'نسخة احتياطية من بيانات ' + (settings.shopName || 'المتجر') + ' بتاريخ ' + todayStr()
+      });
+      showToast('تم فتح نافذة المشاركة — اختر واتساب أو إيميل أو درايف');
+    }else{
+      showToast('المشاركة المباشرة غير مدعومة هنا، سيتم تنزيل الملف بدلاً منها');
+      exportBackup();
+    }
+  }catch(e){
+    if(e && e.name === 'AbortError') return; // المستخدم أغلق نافذة المشاركة بدون اختيار
+    showToast('تعذّرت المشاركة، جرّب زر "تصدير" ثم أرسل الملف يدويًا');
+  }
 }
 
 function exportBackup(silent){
@@ -6334,12 +6408,27 @@ function openDailyClosing(){
   openOverlay();
 }
 
+let expensesDateFilter = null;
+function setExpensesDateFilter(v){ expensesDateFilter = v || null; openExpenses(); }
+function clearExpensesDateFilter(){ expensesDateFilter = null; openExpenses(); }
+
 function openExpenses(){
   const sheet = document.getElementById('sheetContent');
   const today = todayStr();
   const todayTotal = expenses.filter(e=>e.date.slice(0,10)===today).reduce((a,e)=>a+e.amount,0);
   const allTotal = expenses.reduce((a,e)=>a+e.amount,0);
   const sorted = [...expenses].sort((a,b)=> new Date(b.date)-new Date(a.date));
+  const filtered = expensesDateFilter ? sorted.filter(e=>String(e.date).slice(0,10)===expensesDateFilter) : sorted;
+
+  // إحصائيات المصاريف يوميًا: تجميع كل المصاريف حسب اليوم مع مجموع كل يوم، لعرض اتجاه الصرف عبر الأيام.
+  const dayGroups = {};
+  const dayOrder = [];
+  filtered.forEach(e=>{
+    const key = String(e.date).slice(0,10);
+    if(!dayGroups[key]){ dayGroups[key] = []; dayOrder.push(key); }
+    dayGroups[key].push(e);
+  });
+
   sheet.innerHTML = `
     <div class="sheet-head">
       <h3>المصاريف اليومية</h3>
@@ -6358,24 +6447,35 @@ function openExpenses(){
     <div class="sheet-actions" style="margin-bottom:16px;">
       <button class="btn btn-brass btn-block" onclick="openExpenseForm()">+ إضافة مصروف</button>
     </div>
-    <div class="section-title"><span>السجل</span></div>
-    ${sorted.length === 0 ? `<div class="empty" style="padding:24px;">لا توجد مصاريف مسجلة بعد</div>` : `
-    <div class="ledger">
-      ${sorted.map(e=>{
-        const d = new Date(e.date);
-        const dateStr = d.toLocaleDateString('ar') + ' - ' + d.toLocaleTimeString('ar', {hour:'2-digit', minute:'2-digit'});
-        return `
-        <div class="row">
-          <div class="row-main">
-            <div class="row-name">${escapeHtml(e.category)}${e.note ? ' — ' + escapeHtml(e.note) : ''}</div>
-            <div class="row-sub">${dateStr}</div>
-          </div>
-          <div class="mono" style="font-weight:700;color:var(--alert);">${plainNum(e.amount)}</div>
-          <button class="icon-btn" onclick="deleteExpense('${e.id}')">🗑</button>
-        </div>`;
-      }).join('')}
+    <div class="section-title"><span>إحصائيات المصاريف حسب اليوم</span></div>
+    <div class="stats-date-picker" style="margin-bottom:14px;">
+      <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;">
+        <input type="date" id="expensesSelectedDate" value="${expensesDateFilter ? statsEscape(expensesDateFilter) : ''}" onchange="setExpensesDateFilter(this.value)" style="flex:1;min-width:180px;">
+        <button class="chip" onclick="clearExpensesDateFilter()">كل الأيام</button>
+      </div>
     </div>
-    `}
+    ${dayOrder.length === 0 ? `<div class="empty" style="padding:24px;">${expensesDateFilter ? 'لا توجد مصاريف في هذا اليوم' : 'لا توجد مصاريف مسجلة بعد'}</div>` : dayOrder.map(dayKey=>{
+      const dayItems = dayGroups[dayKey];
+      const dayTotal = dayItems.reduce((a,e)=>a+e.amount,0);
+      return `
+      <div class="section-title" style="margin-top:10px;"><span>${invoiceDayLabel(dayKey)}</span><span class="mono" style="color:var(--alert);font-weight:700;">${plainNum(dayTotal)}</span></div>
+      <div class="ledger" style="margin-bottom:6px;">
+        ${dayItems.map(e=>{
+          const d = new Date(e.date);
+          const timeStr = d.toLocaleTimeString('ar', {hour:'2-digit', minute:'2-digit'});
+          return `
+          <div class="row">
+            <div class="row-main">
+              <div class="row-name">${escapeHtml(e.category)}${e.note ? ' — ' + escapeHtml(e.note) : ''}</div>
+              <div class="row-sub">${timeStr}</div>
+            </div>
+            <div class="mono" style="font-weight:700;color:var(--alert);">${plainNum(e.amount)}</div>
+            <button class="icon-btn" onclick="deleteExpense('${e.id}')">🗑</button>
+          </div>`;
+        }).join('')}
+      </div>
+      `;
+    }).join('')}
   `;
   openOverlay();
 }
@@ -6823,6 +6923,18 @@ function openSettings(){
       <div class="field" style="margin-bottom:0;"><label>رقم هاتف صديقك <span>• لإرسال الطلبيات مباشرة</span></label><input type="tel" id="s-friendphone" value="${escapeHtml(settings.friendPhone||'')}" placeholder="213xxxxxxxxx (بدون +)"></div>
     </div>
 
+    <div class="settings-group-title"><span class="settings-group-icon">🖨️</span><div><b>الطباعة الحرارية</b><small>لطابعة الفواتير والملصقات (نفس الطابعة، غيّر لف الورق)</small></div></div>
+    <div class="settings-card">
+      <div class="field" style="margin-bottom:0;">
+        <label>عرض ورق الطابعة الحرارية</label>
+        <select id="s-thermal-width">
+          <option value="58mm" ${settings.thermalPaperWidth!=='80mm' ? 'selected':''}>58mm (الأكثر شيوعًا)</option>
+          <option value="80mm" ${settings.thermalPaperWidth==='80mm' ? 'selected':''}>80mm</option>
+        </select>
+      </div>
+      <div class="row-sub" style="margin-top:8px;">إذا كانت الفاتورة أو الملصقات تطبع بعرض غلط أو مقطوعة، جرّب تبدّل هذا الخيار. لطباعة الملصقات، اختر نفس الخيار — الطباعة تتم على عرض الورق المركّب حاليًا في الطابعة.</div>
+    </div>
+
     <div class="settings-group-title"><span class="settings-group-icon">🔐</span><div><b>الخصوصية والحماية</b><small>حماية الأرباح وتأمين فتح التطبيق</small></div></div>
     <div class="settings-card">
       <div class="settings-toggle-row"><div><b>إخفاء الأرباح</b><small>تختفي كل أرقام الأرباح من التطبيق</small></div><input type="checkbox" id="s-hideprofit" ${settings.hideProfit ? 'checked':''} onchange="onHideProfitChange()"></div>
@@ -6943,6 +7055,9 @@ async function saveSettingsForm(){
   if(autoLockEl) settings.autoLockMinutes = parseInt(autoLockEl.value) || 0;
   settings.currency = cur;
   settings.hideProfit = newHide;
+  const thermalEl = document.getElementById('s-thermal-width');
+  if(thermalEl) settings.thermalPaperWidth = thermalEl.value === '80mm' ? '80mm' : '58mm';
+  applyThermalPrintStyle();
 
   const pwVal = document.getElementById('s-app-password').value;
   if(pwVal === '__CLEAR__'){
