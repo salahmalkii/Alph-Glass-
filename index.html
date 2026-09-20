@@ -3689,6 +3689,10 @@ function applyThermalPrintStyle(){
 }
 
 function printInvoice(inv){
+  if(pt210Supported()){
+    printPT210Invoice(inv);
+    return;
+  }
   const d = new Date(inv.date);
   const dateStr = d.toLocaleDateString('ar') + ' - ' + d.toLocaleTimeString('ar', {hour:'2-digit', minute:'2-digit'});
   const cust = inv.customerId ? customers.find(c=>c.id===inv.customerId) : null;
@@ -5874,6 +5878,261 @@ function selectLabelProduct(productId, labelName){
   `;
 }
 
+/* ================= GOOJPRT PT-210 direct Bluetooth printing ================= */
+// PT-210: 58mm ESC/POS printer. Most firmware revisions expose one of two BLE GATT sets.
+const PT210_SERVICE_UUID = '49535343-fe7d-4ae5-8fa9-9fafd205e455';
+const PT210_WRITE_UUID = '49535343-8841-43f4-a8d4-ecbe34729bb3';
+const PT210_NOTIFY_UUID = '49535343-1e4d-4bd9-ba61-23c647249616';
+const PT210_SERVICE_UUID_ALT = '0000ff00-0000-1000-8000-00805f9b34fb';
+const PT210_WRITE_UUID_ALT = '0000ff02-0000-1000-8000-00805f9b34fb';
+const PT210_NOTIFY_UUID_ALT = '0000ff01-0000-1000-8000-00805f9b34fb';
+const PT210_PAPER_PX = 384; // 48mm printable width at 203dpi
+let pt210Device = null;
+let pt210WriteCharacteristic = null;
+let pt210Connecting = false;
+
+function pt210Supported(){
+  return !!(navigator.bluetooth && window.isSecureContext);
+}
+
+function pt210DisconnectHandler(){
+  pt210WriteCharacteristic = null;
+  showToast('انقطع اتصال PT-210 — اضغط طباعة لإعادة الاتصال');
+}
+
+async function connectPT210(){
+  if(!pt210Supported()){
+    showToast('الطباعة المباشرة تحتاج Chrome عبر HTTPS');
+    return false;
+  }
+  if(pt210WriteCharacteristic && pt210Device?.gatt?.connected) return true;
+  if(pt210Connecting) return false;
+  pt210Connecting = true;
+  try{
+    let device = null;
+    // Reuse a previously authorized PT-210 when Chrome exposes it.
+    if(navigator.bluetooth.getDevices){
+      try{
+        const devices = await navigator.bluetooth.getDevices();
+        device = devices.find(d => {
+          const n = String(d.name || '').toLowerCase();
+          return n.includes('pt-210') || n.includes('pt210') || n.includes('mtp-2') || n.includes('mtp-ii');
+        }) || devices.find(d => d.gatt);
+      }catch(_e){}
+    }
+    if(!device){
+      device = await navigator.bluetooth.requestDevice({
+        acceptAllDevices: true,
+        optionalServices: [PT210_SERVICE_UUID, PT210_SERVICE_UUID_ALT]
+      });
+    }
+    pt210Device = device;
+    if(!pt210Device.__alphaPt210DisconnectBound){
+      pt210Device.addEventListener('gattserverdisconnected', pt210DisconnectHandler);
+      pt210Device.__alphaPt210DisconnectBound = true;
+    }
+    const server = pt210Device.gatt.connected ? pt210Device.gatt : await pt210Device.gatt.connect();
+
+    let service = null;
+    try{ service = await server.getPrimaryService(PT210_SERVICE_UUID); }catch(_e){}
+    if(!service) service = await server.getPrimaryService(PT210_SERVICE_UUID_ALT);
+
+    try{
+      pt210WriteCharacteristic = await service.getCharacteristic(PT210_WRITE_UUID);
+    }catch(_e){
+      pt210WriteCharacteristic = await service.getCharacteristic(PT210_WRITE_UUID_ALT);
+    }
+
+    // Notifications are optional for printing; subscribe when available.
+    try{
+      const notifyChar = await service.getCharacteristic(PT210_NOTIFY_UUID);
+      if(notifyChar.properties.notify) await notifyChar.startNotifications();
+    }catch(_e){
+      try{
+        const notifyChar = await service.getCharacteristic(PT210_NOTIFY_UUID_ALT);
+        if(notifyChar.properties.notify) await notifyChar.startNotifications();
+      }catch(_e2){}
+    }
+
+    showToast(`تم الاتصال بـ ${pt210Device.name || 'PT-210'}`);
+    return true;
+  }catch(err){
+    pt210WriteCharacteristic = null;
+    if(err?.name !== 'NotFoundError') showToast('تعذر الاتصال بطابعة PT-210');
+    return false;
+  }finally{
+    pt210Connecting = false;
+  }
+}
+
+function pt210Delay(ms){ return new Promise(resolve=>setTimeout(resolve, ms)); }
+
+async function pt210Write(bytes){
+  if(!pt210WriteCharacteristic) throw new Error('PT-210 غير متصلة');
+  const data = bytes instanceof Uint8Array ? bytes : new Uint8Array(bytes);
+  // 180 bytes stays safely below the common 182-byte BLE write limit.
+  for(let i=0;i<data.length;i+=180){
+    const chunk = data.slice(i, i+180);
+    if(pt210WriteCharacteristic.writeValueWithoutResponse){
+      await pt210WriteCharacteristic.writeValueWithoutResponse(chunk);
+    }else{
+      await pt210WriteCharacteristic.writeValue(chunk);
+    }
+    await pt210Delay(8);
+  }
+}
+
+function pt210CanvasForText(text, opts={}){
+  const width = PT210_PAPER_PX;
+  const padding = 16;
+  const fontSize = Math.max(20, Number(opts.fontSize || 27));
+  const lineHeight = Math.round(fontSize * 1.45);
+  const rawLines = String(text ?? '').split('\n');
+  const lines = [];
+  const ctxMeasure = document.createElement('canvas').getContext('2d');
+  ctxMeasure.font = `${opts.bold === false ? '' : 'bold '}${fontSize}px Arial, Tahoma, sans-serif`;
+  const maxWidth = width - padding*2;
+  rawLines.forEach(raw=>{
+    const line = String(raw);
+    if(!line){ lines.push(''); return; }
+    // Break long lines while keeping Arabic/Latin readable.
+    let current = '';
+    const parts = line.split(/(\s+)/);
+    for(const part of parts){
+      const test = current + part;
+      if(current && ctxMeasure.measureText(test).width > maxWidth){
+        lines.push(current.trimEnd());
+        current = part.trimStart();
+      }else{
+        current = test;
+      }
+    }
+    if(current || !lines.length) lines.push(current.trimEnd());
+  });
+  const height = Math.max(lineHeight + 12, lines.length*lineHeight + 18);
+  const canvas = document.createElement('canvas');
+  canvas.width = width;
+  canvas.height = height;
+  const ctx = canvas.getContext('2d', {willReadFrequently:true});
+  ctx.fillStyle = '#fff';
+  ctx.fillRect(0,0,width,height);
+  ctx.fillStyle = '#000';
+  ctx.textBaseline = 'top';
+  ctx.textAlign = 'center';
+  ctx.font = `${opts.bold === false ? '' : 'bold '}${fontSize}px Arial, Tahoma, sans-serif`;
+  lines.forEach((line,i)=>{
+    ctx.fillText(line, width/2, 9 + i*lineHeight);
+  });
+  return canvas;
+}
+
+function pt210CanvasRaster(canvas){
+  const ctx=canvas.getContext('2d', {willReadFrequently:true});
+  const img=ctx.getImageData(0,0,canvas.width,canvas.height).data;
+  const widthBytes=Math.ceil(canvas.width/8);
+  const raster=new Uint8Array(widthBytes*canvas.height);
+  for(let y=0;y<canvas.height;y++){
+    for(let x=0;x<canvas.width;x++){
+      const i=(y*canvas.width+x)*4;
+      const luminance=(img[i]*299 + img[i+1]*587 + img[i+2]*114)/1000;
+      if(luminance < 180 && img[i+3] > 20){
+        raster[y*widthBytes+(x>>3)] |= (0x80>>(x&7));
+      }
+    }
+  }
+  return {raster,widthBytes,height:canvas.height};
+}
+
+function pt210RasterCommand(raster,widthBytes,height){
+  return new Uint8Array([
+    0x1d,0x76,0x30,0x00,
+    widthBytes & 0xff,(widthBytes>>8)&0xff,
+    height & 0xff,(height>>8)&0xff,
+    ...raster
+  ]);
+}
+
+function pt210EscPosInit(){ return new Uint8Array([0x1b,0x40]); }
+function pt210Feed(lines=3){ return new Uint8Array([0x1b,0x64,Math.max(0,Math.min(8,lines))]); }
+
+async function printPT210Text(text, copies=1, opts={}){
+  if(!pt210Supported()){
+    showToast('افتح Alpha Glass من Chrome عبر HTTPS لتفعيل Bluetooth');
+    return false;
+  }
+  if(!pt210WriteCharacteristic || !pt210Device?.gatt?.connected){
+    const ok=await connectPT210();
+    if(!ok) return false;
+  }
+  const safeCopies=Math.max(1, Math.min(50, Number(copies)||1));
+  const canvas=pt210CanvasForText(text, opts);
+  const {raster,widthBytes,height}=pt210CanvasRaster(canvas);
+  try{
+    for(let copy=0;copy<safeCopies;copy++){
+      await pt210Write(pt210EscPosInit());
+      await pt210Delay(30);
+      await pt210Write(pt210RasterCommand(raster,widthBytes,height));
+      await pt210Delay(120);
+      await pt210Write(pt210Feed(3));
+      await pt210Delay(120);
+    }
+    showToast('تمت الطباعة على PT-210');
+    return true;
+  }catch(err){
+    pt210WriteCharacteristic=null;
+    showToast('تعذر إرسال البيانات إلى PT-210');
+    return false;
+  }
+}
+
+function buildPT210InvoiceText(inv){
+  const d = new Date(inv.date);
+  const dateStr = d.toLocaleDateString('ar') + ' - ' + d.toLocaleTimeString('ar', {hour:'2-digit', minute:'2-digit'});
+  const cust = inv.customerId ? customers.find(c=>c.id===inv.customerId) : null;
+  const lines=[];
+  lines.push(settings.shopName || 'Alpha Glass');
+  if(settings.shopPhone) lines.push(settings.shopPhone);
+  lines.push(`فاتورة #${inv.number}`);
+  lines.push(dateStr);
+  lines.push('--------------------------------');
+  (inv.items||[]).forEach(it=>{
+    lines.push(`${it.name}`);
+    lines.push(`  ${it.qty} × ${plainNum(it.sellPrice)} = ${plainNum(it.qty*it.sellPrice)} ${settings.currency}`);
+  });
+  lines.push('--------------------------------');
+  if(inv.discountAmount > 0){
+    lines.push(`المجموع: ${plainNum(inv.rawTotal)} ${settings.currency}`);
+    lines.push(`الخصم: -${plainNum(inv.discountAmount)} ${settings.currency}`);
+  }
+  lines.push(`الإجمالي: ${plainNum(inv.total)} ${settings.currency}`);
+  if(cust && inv.remaining > 0){
+    lines.push(`العميل: ${cust.name}`);
+    if(inv.paidNow > 0) lines.push(`المدفوع: ${plainNum(inv.paidNow)} ${settings.currency}`);
+    lines.push(`الدين: ${plainNum(inv.remaining)} ${settings.currency}`);
+  }
+  lines.push('--------------------------------');
+  lines.push('شكراً لتعاملكم معنا');
+  return lines.join('\n');
+}
+
+async function printPT210Invoice(inv){
+  const text=buildPT210InvoiceText(inv);
+  return await printPT210Text(text,1,{fontSize:24});
+}
+
+function openPT210Settings(){
+  const sheet=document.getElementById('sheetContent');
+  sheet.innerHTML=`
+    <div class="sheet-head"><h3>طابعة GOOJPRT PT-210</h3><button class="icon-btn" onclick="closeOverlay()">✕</button></div>
+    <div class="settings-card">
+      <div class="row-name">🖨️ طباعة مباشرة عبر Bluetooth</div>
+      <div class="row-sub" style="margin-top:6px;">PT-210 تعمل بورق 58mm وبأوامر ESC/POS. فعّل Bluetooth ثم اربط الطابعة.</div>
+      <button class="btn btn-brass btn-block" style="margin-top:14px;" onclick="connectPT210()">🔗 ربط PT-210</button>
+      <button class="btn btn-outline btn-block" style="margin-top:8px;" onclick="printPT210Text('اختبار Alpha Glass\\nGOOJPRT PT-210',1,{fontSize:27})">🧪 اختبار الطباعة</button>
+    </div>`;
+  openOverlay();
+}
+
 function printProductLabels(productId, labelName){
   const p = products.find(x=>x.id===productId);
   if(!p) return;
@@ -5882,8 +6141,13 @@ function printProductLabels(productId, labelName){
   if(isNaN(qty) || qty < 1) qty = 1;
   if(qty > 200) qty = 200;
 
+  if(pt210Supported()) {
+    printPT210Text(name, qty, {fontSize:30});
+    return;
+  }
   const grid = document.getElementById('labelGridContent');
   grid.innerHTML = Array.from({length: qty}).map(()=>`<div class="label-box">${escapeHtml(name)}</div>`).join('');
+  applyThermalPrintStyle();
   window.print();
 }
 
@@ -5899,8 +6163,20 @@ function printCartLabels(){
     const labelCount = Math.max(1, Math.ceil(qty / LABEL_BATCH_SIZE));
     for(let i=0;i<labelCount;i++) labels.push(name);
   });
+  if(pt210Supported()) {
+    (async()=>{
+      const ok=await connectPT210();
+      if(!ok) return;
+      for(const name of labels) {
+        const done=await printPT210Text(name,1,{fontSize:30});
+        if(!done) break;
+      }
+    })();
+    return;
+  }
   const grid = document.getElementById('labelGridContent');
   grid.innerHTML = labels.map(n=>`<div class="label-box">${escapeHtml(n)}</div>`).join('');
+  applyThermalPrintStyle();
   window.print();
 }
 
@@ -7130,6 +7406,7 @@ function openSettings(){
     </div>
 
     <div class="settings-group-title"><span class="settings-group-icon">🖨️</span><div><b>الطباعة الحرارية</b><small>لطابعة الفواتير والملصقات (نفس الطابعة، غيّر لف الورق)</small></div></div>
+    <div class="settings-card" style="margin-top:10px;"><div class="row" style="cursor:pointer;" onclick="openPT210Settings()"><div class="row-main"><div class="row-name">🏷️ ربط GOOJPRT PT-210</div><div class="row-sub">ربط Bluetooth واختبار الطباعة مباشرة</div></div><span class="settings-arrow">‹</span></div></div>
     <div class="settings-card">
       <div class="field" style="margin-bottom:0;">
         <label>عرض ورق الطابعة الحرارية</label>
