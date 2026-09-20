@@ -1072,7 +1072,7 @@ let products = [];
 let invoices = [];
 let customers = [];
 let customerTx = [];
-let settings = { shopName: "Alpha Glass", currency: "ر.س", hideProfit: false, profitPin: "", shopPhone: "", appPassword: "", fingerprintCredentialId: "", friendPhone: "", autoLockMinutes: 0, limitedPassword: "", homeTiles: ['sell','inventory','invoices','customers','orders','debts'], thermalPaperWidth: "58mm", expenseCategories: [] };
+let settings = { shopName: "Alpha Glass", currency: "ر.س", hideProfit: false, profitPin: "", shopPhone: "", appPassword: "", fingerprintCredentialId: "", friendPhone: "", autoLockMinutes: 0, limitedPassword: "", homeTiles: ['sell','inventory','invoices','customers','orders','debts'], thermalPaperWidth: "58mm", pt210FontSize: 42, pt210Align: "center", pt210Offset: 0, pt210Bold: true, expenseCategories: [] };
 let cart = {}; // productId -> qty
 let cartDisplayName = {}; // productId -> alternate name to sell/print under (from a compat group)
 let cartOverride = {}; // productId -> edited price for current checkout
@@ -5985,12 +5985,15 @@ async function pt210Write(bytes){
 function pt210CanvasForText(text, opts={}){
   const width = PT210_PAPER_PX;
   const padding = 16;
-  const fontSize = Math.max(20, Number(opts.fontSize || 27));
+  const fontSize = Math.max(16, Math.min(72, Number(opts.fontSize ?? settings.pt210FontSize ?? 42)));
+  const align = ['left','center','right'].includes(opts.align) ? opts.align : (['left','center','right'].includes(settings.pt210Align) ? settings.pt210Align : 'center');
+  const offset = Math.max(-120, Math.min(120, Number(opts.offset ?? settings.pt210Offset ?? 0)));
+  const bold = opts.bold !== undefined ? !!opts.bold : settings.pt210Bold !== false;
   const lineHeight = Math.round(fontSize * 1.45);
   const rawLines = String(text ?? '').split('\n');
   const lines = [];
   const ctxMeasure = document.createElement('canvas').getContext('2d');
-  ctxMeasure.font = `${opts.bold === false ? '' : 'bold '}${fontSize}px Arial, Tahoma, sans-serif`;
+  ctxMeasure.font = `${bold ? 'bold ' : ''}${fontSize}px Arial, Tahoma, sans-serif`;
   const maxWidth = width - padding*2;
   rawLines.forEach(raw=>{
     const line = String(raw);
@@ -6018,10 +6021,13 @@ function pt210CanvasForText(text, opts={}){
   ctx.fillRect(0,0,width,height);
   ctx.fillStyle = '#000';
   ctx.textBaseline = 'top';
-  ctx.textAlign = 'center';
-  ctx.font = `${opts.bold === false ? '' : 'bold '}${fontSize}px Arial, Tahoma, sans-serif`;
+  ctx.textAlign = align;
+  ctx.direction = /[\u0600-\u06FF]/.test(lines.join('')) ? 'rtl' : 'ltr';
+  ctx.font = `${bold ? 'bold ' : ''}${fontSize}px Arial, Tahoma, sans-serif`;
+  const baseX = align === 'left' ? padding : align === 'right' ? width - padding : width / 2;
+  const x = Math.max(padding, Math.min(width - padding, baseX + offset));
   lines.forEach((line,i)=>{
-    ctx.fillText(line, width/2, 9 + i*lineHeight);
+    ctx.fillText(line, x, 9 + i*lineHeight);
   });
   return canvas;
 }
@@ -6117,7 +6123,24 @@ function buildPT210InvoiceText(inv){
 
 async function printPT210Invoice(inv){
   const text=buildPT210InvoiceText(inv);
-  return await printPT210Text(text,1,{fontSize:24});
+  return await printPT210Text(text,1,{fontSize:Math.max(16, Math.min(72, Number(settings.pt210FontSize || 42)))});
+}
+
+async function savePT210PrintSettings(){
+  const fsEl=document.getElementById('pt210-font-size');
+  const alEl=document.getElementById('pt210-align');
+  const offEl=document.getElementById('pt210-offset');
+  const boldEl=document.getElementById('pt210-bold');
+  let fs=parseInt(fsEl?.value,10);
+  if(!Number.isFinite(fs)) fs=42;
+  settings.pt210FontSize=Math.max(16,Math.min(72,fs));
+  settings.pt210Align=['left','center','right'].includes(alEl?.value) ? alEl.value : 'center';
+  let off=parseInt(offEl?.value,10);
+  if(!Number.isFinite(off)) off=0;
+  settings.pt210Offset=Math.max(-120,Math.min(120,off));
+  settings.pt210Bold=!!boldEl?.checked;
+  await saveSettings();
+  showToast('تم حفظ إعدادات الطباعة');
 }
 
 function openPT210Settings(){
@@ -6128,7 +6151,13 @@ function openPT210Settings(){
       <div class="row-name">🖨️ طباعة مباشرة عبر Bluetooth</div>
       <div class="row-sub" style="margin-top:6px;">PT-210 تعمل بورق 58mm وبأوامر ESC/POS. فعّل Bluetooth ثم اربط الطابعة.</div>
       <button class="btn btn-brass btn-block" style="margin-top:14px;" onclick="connectPT210()">🔗 ربط PT-210</button>
-      <button class="btn btn-outline btn-block" style="margin-top:8px;" onclick="printPT210Text('اختبار Alpha Glass\\nGOOJPRT PT-210',1,{fontSize:27})">🧪 اختبار الطباعة</button>
+      <div class="field" style="margin-top:14px;"><label>حجم الخط <span>• 16 إلى 72</span></label><input type="number" id="pt210-font-size" min="16" max="72" step="1" value="${Number(settings.pt210FontSize||42)}"></div>
+      <div class="field"><label>محاذاة النص</label><select id="pt210-align"><option value="right" ${settings.pt210Align==='right'?'selected':''}>يمين</option><option value="center" ${(!settings.pt210Align||settings.pt210Align==='center')?'selected':''}>وسط</option><option value="left" ${settings.pt210Align==='left'?'selected':''}>يسار</option></select></div>
+      <div class="field"><label>تحريك أفقي</label><input type="range" id="pt210-offset" min="-120" max="120" step="1" value="${Number(settings.pt210Offset||0)}" oninput="document.getElementById('pt210-offset-value').textContent=this.value"></div>
+      <div class="row-sub" style="text-align:center;margin-top:-4px;">الإزاحة: <b id="pt210-offset-value">${Number(settings.pt210Offset||0)}</b> px — السالب لليسار والموجب لليمين</div>
+      <div class="settings-toggle-row" style="margin-top:10px;"><div><b>خط عريض</b><small>تكبير سماكة الكتابة</small></div><input type="checkbox" id="pt210-bold" ${settings.pt210Bold!==false?'checked':''}></div>
+      <button class="btn btn-outline btn-block" style="margin-top:12px;" onclick="savePT210PrintSettings()">💾 حفظ إعدادات الطباعة</button>
+      <button class="btn btn-outline btn-block" style="margin-top:8px;" onclick="savePT210PrintSettings();printPT210Text('اختبار Alpha Glass\\nGOOJPRT PT-210',1,{fontSize:Number(settings.pt210FontSize||42),align:settings.pt210Align,offset:Number(settings.pt210Offset||0),bold:settings.pt210Bold})">🧪 اختبار الطباعة</button>
     </div>`;
   openOverlay();
 }
@@ -6142,7 +6171,7 @@ function printProductLabels(productId, labelName){
   if(qty > 200) qty = 200;
 
   if(pt210Supported()) {
-    printPT210Text(name, qty, {fontSize:30});
+    printPT210Text(name, qty, {fontSize:Math.max(16, Math.min(72, Number(settings.pt210FontSize || 42)))});
     return;
   }
   const grid = document.getElementById('labelGridContent');
@@ -6168,7 +6197,7 @@ function printCartLabels(){
       const ok=await connectPT210();
       if(!ok) return;
       for(const name of labels) {
-        const done=await printPT210Text(name,1,{fontSize:30});
+        const done=await printPT210Text(name,1,{fontSize:Math.max(16, Math.min(72, Number(settings.pt210FontSize || 42)))});
         if(!done) break;
       }
     })();
