@@ -5542,6 +5542,17 @@ function renderGlobalSearchResults(){
   el.innerHTML = html;
 }
 
+function navigateFromOverlayToScreen(name){
+  const target = String(name || 'home');
+  const ov = document.getElementById('overlay');
+  if(ov) ov.classList.remove('active');
+  overlayHistoryPushed = false;
+  overlayCurrentView = null;
+  currentScreenState = target;
+  history.replaceState({screen:target}, '', location.href);
+  applyScreenSwitch(target);
+}
+
 function openMoreMenu(){
   const sheet = document.getElementById('sheetContent');
   sheet.innerHTML = `
@@ -5550,13 +5561,13 @@ function openMoreMenu(){
       <button class="icon-btn" onclick="closeOverlay()">✕</button>
     </div>
     <div class="ledger">
-      <div class="row" style="cursor:pointer;" onclick="closeOverlay();switchScreen('inventory');">
+      <div class="row" style="cursor:pointer;" onclick="navigateFromOverlayToScreen('inventory');">
         <div class="row-main">
           <div class="row-name">📦 المخزون</div>
           <div class="row-sub">إدارة الأصناف والكميات والأسعار</div>
         </div>
       </div>
-      <div class="row" style="cursor:pointer;" onclick="closeOverlay();switchScreen('profits');">
+      <div class="row" style="cursor:pointer;" onclick="navigateFromOverlayToScreen('profits');">
         <div class="row-main">
           <div class="row-name">📈 الأرباح</div>
           <div class="row-sub">إجمالي المبيعات والتكلفة والربح</div>
@@ -6089,36 +6100,113 @@ function importBackup(event){
 /* ================= Overdue Debts ================= */
 function openOverdueDebts(){
   const sheet = document.getElementById('sheetContent');
-  const now = new Date();
-  const withDebt = customers.filter(c=>c.balance > 0).map(c=>{
-    const debtTx = customerTx.filter(t=>t.customerId===c.id && t.type==='debt').sort((a,b)=> new Date(a.date)-new Date(b.date));
-    const oldest = debtTx.length > 0 ? new Date(debtTx[0].date) : null;
-    const days = oldest ? Math.floor((now - oldest) / (1000*60*60*24)) : 0;
+  const debtors = customers.filter(c => Number(c.balance || 0) > 0).map(c => {
+    const debtTx = customerTx
+      .filter(t => t.customerId === c.id && t.type === 'debt')
+      .sort((a,b) => new Date(a.date) - new Date(b.date));
+    const oldest = debtTx.length ? new Date(debtTx[0].date) : null;
+    const days = oldest ? Math.max(0, Math.floor((Date.now() - oldest.getTime()) / 86400000)) : 0;
     return { c, days };
-  }).sort((a,b)=> b.days - a.days);
+  });
+
+  const totalDebt = debtors.reduce((a,r) => a + Number(r.c.balance || 0), 0);
+  const cityMap = {};
+  debtors.forEach(r => {
+    const city = String(r.c.tag || 'بدون مدينة').trim() || 'بدون مدينة';
+    if(!cityMap[city]) cityMap[city] = { total:0, count:0, rows:[] };
+    cityMap[city].total += Number(r.c.balance || 0);
+    cityMap[city].count++;
+    cityMap[city].rows.push(r);
+  });
+  const cities = Object.entries(cityMap).sort((a,b) => b[1].total - a[1].total);
+  const overdue7 = debtors.filter(r => r.days >= 7).length;
+  const overdue30 = debtors.filter(r => r.days >= 30).length;
 
   sheet.innerHTML = `
     <div class="sheet-head">
-      <h3>ديون متأخرة</h3>
+      <h3>💳 الديون والعملاء المدينون</h3>
       <button class="icon-btn" onclick="closeOverlay()">✕</button>
     </div>
-    ${withDebt.length === 0 ? `<div class="empty"><span class="big">✅</span>لا يوجد عملاء عليهم ديون حاليًا</div>` : `
-    <div class="ledger">
-      ${withDebt.map(({c, days})=>`
-        <div class="row" style="cursor:pointer;" onclick="switchScreen('customers');openCustomerDetail('${c.id}');">
-          <div class="row-main">
-            <div class="row-name">${escapeHtml(c.name)}</div>
-            <div class="row-sub">${days > 0 ? 'منذ ' + days + ' يوم' : 'اليوم'}</div>
-          </div>
-          <div class="qty-pill ${days >= 7 ? 'low' : ''}">${plainNum(c.balance)} ${settings.currency}</div>
-        </div>
-      `).join('')}
+
+    <div class="stat-grid" style="margin-bottom:12px;">
+      <div class="stat-card"><div class="v mono" style="color:var(--alert);">${plainNum(totalDebt)}</div><div class="l">إجمالي الديون</div></div>
+      <div class="stat-card"><div class="v mono">${debtors.length}</div><div class="l">عدد العملاء المدينين</div></div>
+      <div class="stat-card"><div class="v mono">${overdue7}</div><div class="l">أكثر من 7 أيام</div></div>
+      <div class="stat-card"><div class="v mono">${overdue30}</div><div class="l">أكثر من 30 يوم</div></div>
     </div>
-    `}
+
+    <div class="field" style="margin-bottom:10px;">
+      <label>بحث عن عميل</label>
+      <input type="search" id="debtSearchInput" placeholder="اكتب اسم العميل أو المدينة..." oninput="filterDebtPage()">
+    </div>
+
+    <div class="sheet-actions" style="margin-bottom:14px;">
+      <button class="btn btn-outline" onclick="renderDebtGroups('cities')">🏙️ حسب المدن</button>
+      <button class="btn btn-brass" onclick="renderDebtGroups('customers')">👤 العملاء المدينون</button>
+    </div>
+
+    <div id="debtPageContent"></div>
   `;
   openOverlay();
+  renderDebtGroups('cities');
 }
 
+let debtPageMode = 'cities';
+function renderDebtGroups(mode='cities'){
+  debtPageMode = mode;
+  const el = document.getElementById('debtPageContent');
+  if(!el) return;
+  const q = (document.getElementById('debtSearchInput')?.value || '').trim().toLowerCase();
+  let debtors = customers.filter(c => Number(c.balance || 0) > 0).map(c => {
+    const tx = customerTx.filter(t => t.customerId===c.id && t.type==='debt').sort((a,b)=>new Date(a.date)-new Date(b.date));
+    const oldest = tx.length ? new Date(tx[0].date) : null;
+    const days = oldest ? Math.max(0, Math.floor((Date.now()-oldest.getTime())/86400000)) : 0;
+    return {c,days};
+  }).filter(r => !q || searchTextMatches(r.c.name,q) || String(r.c.tag||'').toLowerCase().includes(q));
+
+  if(!debtors.length){
+    el.innerHTML = '<div class="empty"><span class="big">✅</span>لا يوجد عملاء مدينون يطابقون البحث</div>';
+    return;
+  }
+
+  if(mode==='customers'){
+    debtors.sort((a,b)=>Number(b.c.balance)-Number(a.c.balance));
+    el.innerHTML = `<div class="section-title"><span>👤 العملاء الذين عليهم دين فقط</span><span class="row-sub">${debtors.length} عميل</span></div>
+      <div class="ledger">${debtors.map(r=>debtCustomerRowHtml(r)).join('')}</div>`;
+    return;
+  }
+
+  const groups={};
+  debtors.forEach(r=>{
+    const city=String(r.c.tag||'بدون مدينة').trim()||'بدون مدينة';
+    if(!groups[city]) groups[city]=[];
+    groups[city].push(r);
+  });
+  const entries=Object.entries(groups).sort((a,b)=>b[1].reduce((x,r)=>x+Number(r.c.balance||0),0)-a[1].reduce((x,r)=>x+Number(r.c.balance||0),0));
+  el.innerHTML = entries.map(([city,rows])=>{
+    const total=rows.reduce((a,r)=>a+Number(r.c.balance||0),0);
+    rows.sort((a,b)=>Number(b.c.balance)-Number(a.c.balance));
+    return `<div class="section-title" style="margin-top:14px;"><span>🏙️ ${escapeHtml(city)}</span><span class="mono" style="color:var(--alert);">${plainNum(total)} ${settings.currency}</span></div>
+      <div class="row-sub" style="margin-bottom:7px;">${rows.length} عميل مدين</div>
+      <div class="ledger">${rows.map(r=>debtCustomerRowHtml(r)).join('')}</div>`;
+  }).join('');
+}
+
+function debtCustomerRowHtml(r){
+  const urgent = r.days >= 30;
+  return `<div class="row" style="cursor:pointer;" onclick="openCustomerDetail('${r.c.id}')">
+    <div class="row-main">
+      <div class="row-name">${escapeHtml(r.c.name)}</div>
+      <div class="row-sub">${escapeHtml(r.c.tag || 'بدون مدينة')} · ${r.days ? 'منذ '+r.days+' يوم' : 'دين مسجل اليوم'}</div>
+    </div>
+    <div class="qty-pill ${urgent ? 'low' : ''}">${plainNum(r.c.balance)} ${settings.currency}</div>
+    <button class="icon-btn" onclick="event.stopPropagation();openDebtForm('${r.c.id}','payment')">💵</button>
+  </div>`;
+}
+
+function filterDebtPage(){
+  renderDebtGroups(debtPageMode);
+}
 
 /* ================= Month-over-Month Comparison ================= */
 let statsPeriod = 'month';
@@ -6473,6 +6561,52 @@ function openDailyClosing(){
 let expensesDateFilter = null;
 function setExpensesDateFilter(v){ expensesDateFilter = v || null; openExpenses(); }
 function clearExpensesDateFilter(){ expensesDateFilter = null; openExpenses(); }
+
+
+function openExpenseCategories(){
+  const sheet = document.getElementById('sheetContent');
+  const custom = Array.isArray(settings.expenseCategories) ? settings.expenseCategories : [];
+  sheet.innerHTML = `
+    <div class="sheet-head">
+      <h3>تخصيص أصناف المصاريف</h3>
+      <button class="icon-btn" onclick="openExpenses()">✕</button>
+    </div>
+    <div class="row-sub" style="margin-bottom:12px;">أضف أصنافًا خاصة بمتجرك، وستظهر مباشرة عند إضافة مصروف جديد.</div>
+    <div class="field">
+      <label>اسم الصنف الجديد</label>
+      <input type="text" id="newExpenseCategory" placeholder="مثال: تغليف وأكياس">
+    </div>
+    <button class="btn btn-brass btn-block" onclick="addExpenseCategory()">+ إضافة الصنف</button>
+    <div class="section-title" style="margin-top:18px;"><span>الأصناف المخصصة</span></div>
+    ${custom.length ? `<div class="ledger">${custom.map(c=>`
+      <div class="row">
+        <div class="row-main"><div class="row-name">${escapeHtml(c)}</div></div>
+        <button class="icon-btn" onclick="deleteExpenseCategory('${encodeURIComponent(c)}')">🗑</button>
+      </div>`).join('')}</div>` : `<div class="empty">لا توجد أصناف مخصصة بعد</div>`}
+  `;
+  openOverlay();
+}
+
+async function addExpenseCategory(){
+  const input = document.getElementById('newExpenseCategory');
+  const name = (input?.value || '').trim();
+  if(!name){ showToast('اكتب اسم الصنف'); return; }
+  const cats = Array.isArray(settings.expenseCategories) ? settings.expenseCategories : [];
+  if(getExpenseCategories().some(c=>c.toLowerCase()===name.toLowerCase())){ showToast('هذا الصنف موجود بالفعل'); return; }
+  settings.expenseCategories = [...cats, name];
+  await saveSettings();
+  openExpenseCategories();
+  showToast('تمت إضافة الصنف');
+}
+
+async function deleteExpenseCategory(encoded){
+  const name = decodeURIComponent(encoded || '');
+  const cats = Array.isArray(settings.expenseCategories) ? settings.expenseCategories : [];
+  settings.expenseCategories = cats.filter(c=>c!==name);
+  await saveSettings();
+  openExpenseCategories();
+  showToast('تم حذف الصنف');
+}
 
 function openExpenses(){
   const sheet = document.getElementById('sheetContent');
@@ -7163,84 +7297,77 @@ async function saveSettingsForm(){
 }
 
 /* ================= Overlay ================= */
-function openExpenses(){
-  const sheet = document.getElementById('sheetContent');
-  const today = todayStr();
-  const todayTotal = expenses.filter(e=>String(e.date).slice(0,10)===today).reduce((a,e)=>a+Number(e.amount||0),0);
-  const allTotal = expenses.reduce((a,e)=>a+Number(e.amount||0),0);
-  const sorted = [...expenses].sort((a,b)=> new Date(b.date)-new Date(a.date));
-  const filtered = expensesDateFilter ? sorted.filter(e=>String(e.date).slice(0,10)===expensesDateFilter) : sorted;
-  const filteredTotal = filtered.reduce((a,e)=>a+Number(e.amount||0),0);
-  const uniqueDays = new Set(filtered.map(e=>String(e.date).slice(0,10))).size;
-  const avgDay = uniqueDays ? filteredTotal / uniqueDays : 0;
-  const avgExpense = filtered.length ? filteredTotal / filtered.length : 0;
-  const maxExpense = filtered.length ? Math.max(...filtered.map(e=>Number(e.amount||0))) : 0;
+let overlayHistoryPushed = false;
+let overlayCurrentView = null;
+let __restoringOverlayState = false;
 
-  const categoryStats = {};
-  filtered.forEach(e=>{
-    const c = e.category || 'أخرى';
-    if(!categoryStats[c]) categoryStats[c] = {total:0,count:0};
-    categoryStats[c].total += Number(e.amount||0);
-    categoryStats[c].count++;
-  });
-  const categoryList = Object.entries(categoryStats).sort((a,b)=>b[1].total-a[1].total);
-
-  const dayGroups = {};
-  const dayOrder = [];
-  filtered.forEach(e=>{
-    const key = String(e.date).slice(0,10);
-    if(!dayGroups[key]){ dayGroups[key] = []; dayOrder.push(key); }
-    dayGroups[key].push(e);
-  });
-
-  sheet.innerHTML = `
-    <div class="sheet-head">
-      <h3>المصاريف اليومية</h3>
-      <button class="icon-btn" onclick="closeOverlay()">✕</button>
-    </div>
-    <div class="stat-grid">
-      <div class="stat-card"><div class="v mono" style="color:var(--alert);">${plainNum(todayTotal)}</div><div class="l">مصاريف اليوم</div></div>
-      <div class="stat-card"><div class="v mono" style="color:var(--alert);">${plainNum(allTotal)}</div><div class="l">إجمالي كل المصاريف</div></div>
-    </div>
-    <div class="sheet-actions" style="margin-bottom:10px;">
-      <button class="btn btn-brass btn-block" onclick="openExpenseForm()">+ إضافة مصروف</button>
-      <button class="btn btn-outline btn-block" onclick="openExpenseCategories()" style="margin-top:8px;">⚙ تخصيص أصناف المصاريف</button>
-    </div>
-    <div class="section-title"><span>إحصائيات المصاريف</span><span>${expensesDateFilter ? 'اليوم المحدد' : 'كل الأيام'}</span></div>
-    <div class="stats-date-picker" style="margin-bottom:14px;">
-      <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;">
-        <input type="date" id="expensesSelectedDate" value="${expensesDateFilter ? statsEscape(expensesDateFilter) : ''}" onchange="setExpensesDateFilter(this.value)" style="flex:1;min-width:180px;">
-        <button class="chip" onclick="clearExpensesDateFilter()">كل الأيام</button>
-      </div>
-    </div>
-    <div class="stat-grid">
-      <div class="stat-card"><div class="v mono">${plainNum(filteredTotal)}</div><div class="l">إجمالي الفترة</div></div>
-      <div class="stat-card"><div class="v mono">${plainNum(avgDay)}</div><div class="l">متوسط المصروف في اليوم</div></div>
-      <div class="stat-card"><div class="v mono">${plainNum(avgExpense)}</div><div class="l">متوسط العملية</div></div>
-      <div class="stat-card"><div class="v mono" style="color:var(--alert);">${plainNum(maxExpense)}</div><div class="l">أكبر مصروف</div></div>
-    </div>
-    ${categoryList.length ? `
-      <div class="section-title"><span>توزيع المصاريف حسب الصنف</span></div>
-      <div class="ledger" style="margin-bottom:14px;">
-        ${categoryList.map(([cat,s])=>{
-          const pct = filteredTotal ? (s.total/filteredTotal*100) : 0;
-          return `<div class="row"><div class="row-main"><div class="row-name">${escapeHtml(cat)}</div><div class="row-sub">${s.count} عملية · ${pct.toFixed(1)}%</div></div><div class="mono" style="font-weight:700;color:var(--alert);">${plainNum(s.total)}</div></div>`;
-        }).join('')}
-      </div>` : ''}
-    <div class="section-title"><span>إحصائيات المصاريف حسب اليوم</span></div>
-    ${dayOrder.length === 0 ? `<div class="empty" style="padding:24px;">${expensesDateFilter ? 'لا توجد مصاريف في هذا اليوم' : 'لا توجد مصاريف مسجلة بعد'}</div>` : dayOrder.map(dayKey=>{
-      const dayItems = dayGroups[dayKey];
-      const dayTotal = dayItems.reduce((a,e)=>a+Number(e.amount||0),0);
-      return `<div class="section-title" style="margin-top:10px;"><span>${invoiceDayLabel(dayKey)}</span><span class="mono" style="color:var(--alert);font-weight:700;">${plainNum(dayTotal)}</span></div>
-      <div class="ledger" style="margin-bottom:6px;">${dayItems.map(e=>{
-        const d = new Date(e.date); const timeStr = d.toLocaleTimeString('ar',{hour:'2-digit',minute:'2-digit'});
-        return `<div class="row"><div class="row-main"><div class="row-name">${escapeHtml(e.category||'أخرى')}${e.note ? ' — '+escapeHtml(e.note) : ''}</div><div class="row-sub">${timeStr}</div></div><div class="mono" style="font-weight:700;color:var(--alert);">${plainNum(e.amount)}</div><button class="icon-btn" onclick="deleteExpense('${e.id}')">🗑</button></div>`;
-      }).join('')}</div>`;
-    }).join('')}
-  `;
-  openOverlay();
+function getOverlayCaller(){
+  try{
+    const stack = new Error().stack || '';
+    const lines = stack.split('\n').slice(1);
+    for(const line of lines){
+      const m = line.match(/at\s+([A-Za-z_$][\w$]*)\s*\(/);
+      if(m && m[1] !== 'openOverlay' && m[1] !== 'getOverlayCaller') return m[1];
+    }
+  }catch(e){}
+  return null;
 }
 
+function openOverlay(){
+  const ov = document.getElementById('overlay');
+  if(!ov) return;
+  ov.classList.add('active');
+  const view = getOverlayCaller();
+  if(__restoringOverlayState){
+    if(view) overlayCurrentView = view;
+    return;
+  }
+  // إعادة رسم نفس النافذة (تصفية، إضافة/حذف صنف، تحديث البيانات...) لا تُنشئ
+  // مستوى جديدًا في زر الرجوع. نضيف مستوى فقط عند الانتقال إلى نافذة مختلفة.
+  if(overlayHistoryPushed && view && view === overlayCurrentView) return;
+  const state = {modal:true, screen:currentScreenState, view:view || null};
+  history.pushState(state, '', location.href);
+  overlayHistoryPushed = true;
+  overlayCurrentView = view || null;
+}
+
+function restoreOverlayView(state){
+  const fn = state && state.view ? window[state.view] : null;
+  if(typeof fn !== 'function') return false;
+  __restoringOverlayState = true;
+  try{
+    fn();
+  }catch(err){
+    console.error('تعذر استرجاع النافذة السابقة:', err);
+  }finally{
+    __restoringOverlayState = false;
+  }
+  return true;
+}
+
+function closeOverlay(){
+  const ov = document.getElementById('overlay');
+  if(!ov) return;
+  if(__alphaFeatureReturnCategory){
+    const id = __alphaFeatureReturnCategory;
+    __alphaFeatureReturnCategory = null;
+    openFeatureCategory(id);
+    return;
+  }
+  if(window.__alphaFeatureMode){
+    window.__alphaFeatureMode = false;
+    ov.classList.remove('active');
+    overlayHistoryPushed = false;
+    overlayCurrentView = null;
+    return;
+  }
+  if(overlayHistoryPushed){
+    history.back();
+  }else{
+    ov.classList.remove('active');
+    overlayCurrentView = null;
+  }
+}
 function closeOverlayIfBackdrop(e){ if(e.target.id==='overlay') closeOverlay(); }
 
 /* ================= رفع خانة البحث تلقائيًا فوق لوحة المفاتيح ================= */
@@ -7275,21 +7402,17 @@ if(window.visualViewport){
 window.addEventListener('popstate', function(e){
   const ov = document.getElementById('overlay');
   const state = e.state || {};
-  if(state.modal && state.overlaySnapshot !== undefined && ov){
-    ov.classList.add('active');
+  if(state.modal){
+    if(ov) ov.classList.add('active');
     overlayHistoryPushed = true;
-    overlaySnapshotDepth = Math.max(0, overlaySnapshotDepth - 1);
-    const sheet = document.getElementById('sheetContent');
-    sheet.innerHTML = state.overlaySnapshot;
-    if(state.overlayScrollTop != null) sheet.scrollTop = state.overlayScrollTop;
+    overlayCurrentView = state.view || null;
+    // الرجوع داخل النوافذ يعيد النافذة السابقة، ولا يخرج من التطبيق.
+    if(state.view && restoreOverlayView(state)) return;
     return;
   }
-  if(ov && ov.classList.contains('active')){
-    ov.classList.remove('active');
-    overlayHistoryPushed = false;
-    overlaySnapshotDepth = 0;
-    return;
-  }
+  if(ov) ov.classList.remove('active');
+  overlayHistoryPushed = false;
+  overlayCurrentView = null;
   const targetScreen = state.screen || 'home';
   currentScreenState = targetScreen;
   applyScreenSwitch(targetScreen);
