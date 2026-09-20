@@ -2904,13 +2904,10 @@ function openCheckout(){
   checkoutDiscountType = null;
   checkoutDiscountValue = '';
   orderDraftMode = false;
-  if(posCustomerId){
-    checkoutPaymentMethod = 'credit';
-    checkoutCustomerId = posCustomerId;
-  }else{
-    checkoutPaymentMethod = 'cash';
-    checkoutCustomerId = null;
-  }
+  // "نقدًا" يبقى الخيار الافتراضي دائمًا حتى لو اخترت زبونًا قبل البيع (فاختيار الزبون
+  // للتسجيل لا يعني بالضرورة أنه بيع دين) — التاجر يضغط "دين لعميل" بنفسه عند الحاجة فعلاً.
+  checkoutPaymentMethod = 'cash';
+  checkoutCustomerId = posCustomerId || null;
   buildCheckoutSheet();
   openOverlay();
 }
@@ -3235,29 +3232,61 @@ function playSaleAlert(){
 }
 
 /* ================= Invoices list ================= */
+function invoiceDayLabel(dateKey){
+  const today = todayStr();
+  const y = new Date(); y.setDate(y.getDate()-1);
+  const yesterday = y.toISOString().slice(0,10);
+  if(dateKey === today) return 'اليوم';
+  if(dateKey === yesterday) return 'أمس';
+  return new Date(dateKey).toLocaleDateString('ar', {weekday:'long', year:'numeric', month:'long', day:'numeric'});
+}
+
 function renderInvoices(){
   const list = document.getElementById('invoicesList');
   if(invoices.length === 0){
     list.innerHTML = `<div class="empty"><span class="big">📜</span>لا توجد فواتير بعد<div class="hint">ستظهر هنا فور إتمام أول عملية بيع</div></div>`;
     return;
   }
-  list.innerHTML = invoices.map(inv=>{
-    const d = new Date(inv.date);
-    const dateStr = d.toLocaleDateString('ar') + ' - ' + d.toLocaleTimeString('ar', {hour:'2-digit', minute:'2-digit'});
-    const cust = inv.customerId ? customers.find(c=>c.id===inv.customerId) : null;
-    const hasDebt = cust && inv.remaining > 0;
-    const isPartial = hasDebt && inv.paidNow > 0;
-    const totalPieces = inv.items.reduce((a,it)=>a+it.qty, 0);
+  // تجميع الفواتير حسب اليوم — الفواتير مرتّبة أصلاً من الأحدث للأقدم، فيكفي تجميعها
+  // بالترتيب دون إعادة فرز، مع عرض إجمالي مبيعات وعدد فواتير كل يوم في رأس المجموعة.
+  const groups = [];
+  let curKey = null, curGroup = null;
+  invoices.forEach(inv=>{
+    const dateKey = String(inv.date).slice(0,10);
+    if(dateKey !== curKey){
+      curKey = dateKey;
+      curGroup = { dateKey, items: [] };
+      groups.push(curGroup);
+    }
+    curGroup.items.push(inv);
+  });
+
+  list.innerHTML = groups.map(g=>{
+    const dayTotal = g.items.reduce((a,i)=>a+i.total,0);
+    const cardsHtml = g.items.map(inv=>{
+      const d = new Date(inv.date);
+      const timeStr = d.toLocaleTimeString('ar', {hour:'2-digit', minute:'2-digit'});
+      const cust = inv.customerId ? customers.find(c=>c.id===inv.customerId) : null;
+      const hasDebt = cust && inv.remaining > 0;
+      const isPartial = hasDebt && inv.paidNow > 0;
+      const totalPieces = inv.items.reduce((a,it)=>a+it.qty, 0);
+      return `
+      <div class="invoice-card" onclick='showInvoicePreview(${JSON.stringify(inv).replace(/'/g,"&#39;")}, false)'>
+        <div class="top-row">
+          <div class="num">فاتورة #${inv.number}${cust ? ` — ${escapeHtml(cust.name)}` : ''}</div>
+          <div class="amt mono">${plainNum(inv.total)}</div>
+        </div>
+        <div class="date">${timeStr}</div>
+        <div class="items-count">${inv.items.length} صنف · ${totalPieces} قطعة${settings.hideProfit ? '' : ' · ربح ' + plainNum(inv.profit) + ' ' + settings.currency}</div>
+        ${hasDebt ? `<span class="cat-badge" style="background:var(--alert-bg);color:var(--alert);margin-top:6px;">${isPartial ? 'دفع جزئي' : 'دين'}</span>` : ''}
+      </div>`;
+    }).join('');
     return `
-    <div class="invoice-card" onclick='showInvoicePreview(${JSON.stringify(inv).replace(/'/g,"&#39;")}, false)'>
-      <div class="top-row">
-        <div class="num">فاتورة #${inv.number}${cust ? ` — ${escapeHtml(cust.name)}` : ''}</div>
-        <div class="amt mono">${plainNum(inv.total)}</div>
-      </div>
-      <div class="date">${dateStr}</div>
-      <div class="items-count">${inv.items.length} صنف · ${totalPieces} قطعة${settings.hideProfit ? '' : ' · ربح ' + plainNum(inv.profit) + ' ' + settings.currency}</div>
-      ${hasDebt ? `<span class="cat-badge" style="background:var(--alert-bg);color:var(--alert);margin-top:6px;">${isPartial ? 'دفع جزئي' : 'دين'}</span>` : ''}
-    </div>`;
+    <div class="section-title" style="margin-top:16px;">
+      <span>📅 ${escapeHtml(invoiceDayLabel(g.dateKey))}</span>
+      <span class="row-sub" style="margin-inline-start:auto;">${g.items.length} فاتورة · ${plainNum(dayTotal)} ${settings.currency}</span>
+    </div>
+    ${cardsHtml}`;
   }).join('');
 }
 
@@ -3741,31 +3770,152 @@ async function saveInvoiceEditForm(invoiceId){
   }
 
   const oldRemaining = inv.remaining || 0;
-  const paidNow = inv.paidNow || 0;
-  const newRemaining = Math.max(0, Math.round((total - paidNow + Number.EPSILON) * 100) / 100);
-  const deltaRemaining = Math.round((oldRemaining - newRemaining + Number.EPSILON) * 100) / 100;
+  const oldTotal = inv.total;
+  const excess = Math.round((oldTotal - total + Number.EPSILON) * 100) / 100;
+
+  // الفاتورة كانت مدفوعة بالكامل (لا دين عليها) والتعديل خفّض الإجمالي — يعني فيه فرق
+  // زائد استُلم فعلاً من الزبون. لا نفترض مصيره تلقائيًا (استرجاع نقد أم رصيد له)،
+  // بل نسأل التاجر في كل مرة، حسب ما طلب.
+  if(oldRemaining <= 0 && excess > 0){
+    pendingInvoiceEdit = { invoiceId, newItems, total, cost, oldTotal, excess };
+    openInvoiceEditExcessPrompt();
+    return;
+  }
+
+  await commitInvoiceEdit(invoiceId, newItems, total, cost, false);
+}
+
+let pendingInvoiceEdit = null;
+
+function openInvoiceEditExcessPrompt(){
+  const p = pendingInvoiceEdit;
+  if(!p) return;
+  const inv = invoices.find(x=>x.id===p.invoiceId);
+  if(!inv) return;
+  const cust = inv.customerId ? customers.find(c=>c.id===inv.customerId) : null;
+  const sheet = document.getElementById('sheetContent');
+  sheet.innerHTML = `
+    <div class="sheet-head">
+      <h3>فيه فرق زائد بعد التعديل</h3>
+      <button class="icon-btn" onclick="cancelInvoiceEditExcess()">✕</button>
+    </div>
+    <div class="row-sub" style="margin-bottom:16px;">
+      هذه الفاتورة كانت مدفوعة بالكامل (${plainNum(p.oldTotal)} ${settings.currency})، وبعد التعديل صار إجماليها ${plainNum(p.total)} ${settings.currency}
+      — أي أن هناك ${plainNum(p.excess)} ${settings.currency} مستلَمة فعلاً وزيادة عن المطلوب الآن.
+      ${cust ? `الزبون: ${escapeHtml(cust.name)}.` : ''} ماذا فعلت بهذا الفرق؟
+    </div>
+    <div class="sheet-actions" style="flex-direction:column;gap:10px;">
+      <button class="btn btn-brass btn-block" onclick="resolveInvoiceEditExcess('refund')">💵 أرجعته نقدًا للزبون الآن</button>
+      <button class="btn btn-outline btn-block" onclick="resolveInvoiceEditExcess('credit')">💳 سجّله كرصيد له (يُخصم من مشترياته القادمة)</button>
+    </div>
+  `;
+  openOverlay();
+}
+
+function cancelInvoiceEditExcess(){
+  const p = pendingInvoiceEdit;
+  pendingInvoiceEdit = null;
+  if(p) openInvoiceEditForm(p.invoiceId);
+}
+
+async function resolveInvoiceEditExcess(choice){
+  const p = pendingInvoiceEdit;
+  if(!p) return;
+  const inv = invoices.find(x=>x.id===p.invoiceId);
+  if(!inv){ pendingInvoiceEdit = null; return; }
+
+  if(choice === 'refund'){
+    pendingInvoiceEdit = null;
+    // استرجاع نقدي فقط: يخفّض إجمالي الفاتورة (وبالتالي "النقد المحصّل" تلقائيًا) بدون أي دين أو رصيد.
+    await commitInvoiceEdit(p.invoiceId, p.newItems, p.total, p.cost, true);
+    return;
+  }
+
+  // choice === 'credit': نحتاج زبونًا لتسجيل الرصيد له. إذا الفاتورة غير مرتبطة بزبون، نطلب اختيار واحد أولاً.
+  if(!inv.customerId){
+    const sheet = document.getElementById('sheetContent');
+    const custOptions = customers.map(c=>`<option value="${c.id}">${escapeHtml(c.name)}</option>`).join('');
+    sheet.innerHTML = `
+      <div class="sheet-head">
+        <h3>اختر الزبون</h3>
+        <button class="icon-btn" onclick="cancelInvoiceEditExcess()">✕</button>
+      </div>
+      <div class="row-sub" style="margin-bottom:12px;">هذه الفاتورة غير مرتبطة بزبون. اختر الزبون الذي تريد تسجيل الرصيد (${plainNum(p.excess)} ${settings.currency}) له.</div>
+      ${customers.length === 0 ? `<div class="empty">لا يوجد عملاء مسجّلون بعد — أضف عميلاً من شاشة العملاء أولاً</div>` : `
+      <div class="field">
+        <select id="excessCustSelect">
+          <option value="">— اختر —</option>
+          ${custOptions}
+        </select>
+      </div>
+      <div class="sheet-actions">
+        <button class="btn btn-outline" onclick="openInvoiceEditExcessPrompt()">تراجع</button>
+        <button class="btn btn-brass" onclick="confirmExcessCustomerPick()">تأكيد</button>
+      </div>
+      `}
+    `;
+    return;
+  }
+
+  await commitInvoiceEditExcessCredit(inv.customerId);
+}
+
+async function confirmExcessCustomerPick(){
+  const id = document.getElementById('excessCustSelect')?.value;
+  if(!id){ showToast('اختر زبونًا'); return; }
+  await commitInvoiceEditExcessCredit(id);
+}
+
+async function commitInvoiceEditExcessCredit(customerId){
+  const p = pendingInvoiceEdit;
+  if(!p) return;
+  const c = customers.find(x=>x.id===customerId);
+  if(!c){ showToast('تعذر إيجاد الزبون'); return; }
+  const inv = invoices.find(x=>x.id===p.invoiceId);
+  if(!inv){ pendingInvoiceEdit = null; return; }
+  const note = `رصيد له من تعديل فاتورة #${inv.number} (استرجاع ${plainNum(p.excess)})`;
+  customerTx.unshift({ id: uid(), customerId: c.id, type: 'payment', amount: p.excess, note, date: new Date().toISOString() });
+  c.balance = Math.round((c.balance - p.excess + Number.EPSILON) * 100) / 100;
+  await Promise.all([saveCustomers(), saveCustomerTx()]);
+  if(!inv.customerId) inv.customerId = c.id; // نربط الفاتورة بالزبون حتى يظهر الرصيد في سجله لاحقًا
+  pendingInvoiceEdit = null;
+  await commitInvoiceEdit(p.invoiceId, p.newItems, p.total, p.cost, true);
+}
+
+async function commitInvoiceEdit(invoiceId, newItems, total, cost, skipDeltaTx){
+  const inv = invoices.find(x=>x.id===invoiceId);
+  if(!inv) return;
 
   const saveOps = [saveProducts()];
-  if(deltaRemaining !== 0 && inv.customerId){
-    const c = customers.find(x=>x.id===inv.customerId);
-    if(c){
-      if(deltaRemaining > 0){
-        customerTx.unshift({ id: uid(), customerId: c.id, type: 'payment', amount: deltaRemaining, note: 'تعديل فاتورة #' + inv.number, date: new Date().toISOString() });
-        c.balance = Math.max(0, Math.round((c.balance - deltaRemaining + Number.EPSILON) * 100) / 100);
-      }else{
-        const increase = -deltaRemaining;
-        customerTx.unshift({ id: uid(), customerId: c.id, type: 'debt', amount: increase, note: 'تعديل فاتورة #' + inv.number, date: new Date().toISOString() });
-        c.balance = Math.round((c.balance + increase + Number.EPSILON) * 100) / 100;
+
+  // المسار العادي (لا يوجد فرق زائد مبهم): نحسب فرق الدين كالمعتاد. عند التعامل مع الفرق
+  // الزائد عبر نافذة الاختيار أعلاه (استرجاع/رصيد) نتخطى هذا الحساب لأنه عُولج صراحةً هناك.
+  if(!skipDeltaTx){
+    const oldRemaining = inv.remaining || 0;
+    const paidNow = inv.paidNow || 0;
+    const newRemaining = Math.max(0, Math.round((total - paidNow + Number.EPSILON) * 100) / 100);
+    const deltaRemaining = Math.round((oldRemaining - newRemaining + Number.EPSILON) * 100) / 100;
+    if(deltaRemaining !== 0 && inv.customerId){
+      const c = customers.find(x=>x.id===inv.customerId);
+      if(c){
+        if(deltaRemaining > 0){
+          customerTx.unshift({ id: uid(), customerId: c.id, type: 'payment', amount: deltaRemaining, note: 'تعديل فاتورة #' + inv.number, date: new Date().toISOString() });
+          c.balance = Math.max(0, Math.round((c.balance - deltaRemaining + Number.EPSILON) * 100) / 100);
+        }else{
+          const increase = -deltaRemaining;
+          customerTx.unshift({ id: uid(), customerId: c.id, type: 'debt', amount: increase, note: 'تعديل فاتورة #' + inv.number, date: new Date().toISOString() });
+          c.balance = Math.round((c.balance + increase + Number.EPSILON) * 100) / 100;
+        }
+        saveOps.push(saveCustomers(), saveCustomerTx());
       }
-      saveOps.push(saveCustomers(), saveCustomerTx());
     }
+    if(inv.customerId) inv.remaining = newRemaining;
   }
 
   inv.items = newItems;
   inv.total = total;
   inv.cost = cost;
   inv.profit = total - cost;
-  if(inv.customerId) inv.remaining = newRemaining;
   saveOps.push(saveInvoices());
 
   await Promise.all(saveOps);
@@ -4645,6 +4795,7 @@ function openDailySoldReport(period){
       <button class="chip ${soldReportPeriod==='day'?'active':''}" onclick="openDailySoldReport('day')">اليوم</button>
       <button class="chip ${soldReportPeriod==='week'?'active':''}" onclick="openDailySoldReport('week')">الأسبوع</button>
       <button class="chip ${soldReportPeriod==='month'?'active':''}" onclick="openDailySoldReport('month')">الشهر</button>
+      <button class="chip ${soldReportPeriod==='all'?'active':''}" onclick="openDailySoldReport('all')">كل الفترة</button>
     </div>
     <div class="row-sub" style="margin-bottom:14px;">${curLabel} — إجمالي ${totalPieces} قطعة من ${entries.length} صنف</div>
     ${entries.length === 0 ? `<div class="empty"><span class="big">📦</span>لا توجد مبيعات بهذي الفترة</div>` : `
@@ -5712,6 +5863,11 @@ function getPeriodRanges(period){
     prevEnd = curStart;
     prevStart = new Date(prevEnd.getTime() - 7*24*60*60*1000);
     curLabel = 'آخر 7 أيام'; prevLabel = '7 أيام قبلها';
+  }else if(period === 'all'){
+    curStart = new Date(0);
+    curEnd = endOfToday;
+    prevStart = curStart; prevEnd = curStart;
+    curLabel = 'كل الفترة'; prevLabel = '';
   }else{
     const monthNames = ['يناير','فبراير','مارس','أبريل','مايو','يونيو','يوليو','أغسطس','سبتمبر','أكتوبر','نوفمبر','ديسمبر'];
     const curYear = now.getFullYear(), curMonth = now.getMonth();
@@ -5734,11 +5890,19 @@ function computePeriodStats(start, end){
   const profit = inv.reduce((a,i)=>a+i.profit,0);
   const expensesTotal = exp.reduce((a,e)=>a+e.amount,0);
   const netProfit = profit - expensesTotal;
-  const cashCollected = inv.reduce((a,i)=> a + (i.paymentMethod==='cash' ? i.total : (i.paidNow||0)), 0);
+  const cashFromInvoices = inv.reduce((a,i)=> a + (i.paymentMethod==='cash' ? i.total : (i.paidNow||0)), 0);
+  // تحصيل ديون سابقة (دفعات على فواتير قديمة تمت خلال هذه الفترة) هو أيضًا نقد دخل جيبك،
+  // فيُضاف إلى النقد المحصّل حتى لو كانت الفاتورة الأصلية من يوم آخر.
+  const debtPaymentsCollected = customerTx.filter(t=>{
+    if(t.type!=='payment') return false;
+    const d = new Date(t.date);
+    return d>=start && d<end;
+  }).reduce((a,t)=>a+(t.amount||0),0);
+  const cashCollected = cashFromInvoices + debtPaymentsCollected;
   const newDebt = inv.reduce((a,i)=> a + (i.remaining||0), 0);
   const count = inv.length;
   const avgSale = count > 0 ? sales / count : 0;
-  return { sales, cost, profit, expensesTotal, netProfit, cashCollected, newDebt, count, avgSale };
+  return { sales, cost, profit, expensesTotal, netProfit, cashCollected, newDebt, count, avgSale, debtPaymentsCollected };
 }
 
 function pctChange(cur, prev){
@@ -5915,7 +6079,7 @@ function openMonthComparison(period, selectedDate){
     </div>
     <div class="stats-panel"><div class="stats-panel-head"><strong>اتجاه ${statsEscape(curLabel)}</strong><span>تفاعل: مرّر المؤشر على الرسم</span></div><div class="stats-chart-wrap"><canvas id="statsChart"></canvas><div id="statsChartTip" class="stats-chart-tip"></div></div></div>
     <div class="stats-two-col">
-      <div class="stats-panel"><div class="stats-panel-head"><strong>🔥 الأكثر مبيعًا</strong></div>${top.length?top.map((x,i)=>`<div class="stats-list-row"><em>${i+1}</em><div><b>${statsEscape(x.name)}</b><small>${x.qty} قطعة • ${plainNum(x.sales)}</small></div><strong>${hide?'•••':plainNum(x.profit)}</strong></div>`).join(''):`<div class="empty">لا توجد مبيعات في الفترة</div>`}</div>
+      <div class="stats-panel"><div class="stats-panel-head"><strong>🔥 الأكثر مبيعًا</strong><span class="row-sub" style="cursor:pointer;color:var(--accent-b);" onclick="openDailySoldReport(${statsPeriod==='week'?"'week'":(statsPeriod==='month'?"'month'":"'day'")})">📦 إجمالي القطع من كل صنف ›</span></div>${top.length?top.map((x,i)=>`<div class="stats-list-row"><em>${i+1}</em><div><b>${statsEscape(x.name)}</b><small>${x.qty} قطعة • ${plainNum(x.sales)}</small></div><strong>${hide?'•••':plainNum(x.profit)}</strong></div>`).join(''):`<div class="empty">لا توجد مبيعات في الفترة</div>`}</div>
       <div class="stats-panel"><div class="stats-panel-head"><strong>📦 المخزون</strong></div>${low.length?low.map(x=>`<div class="stats-list-row"><span class="stock-dot ${x.qty<=0?'zero':''}"></span><div><b>${statsEscape(x.name)}</b><small>${x.qty<=0?'نفد المخزون':'كمية منخفضة'}</small></div><strong>${x.qty}</strong></div>`).join(''):`<div class="empty">المخزون جيد</div>`}</div>
     </div>
     <div class="stats-panel"><div class="stats-panel-head"><strong>👥 أهم العملاء</strong><span>حسب قيمة المبيعات</span></div>${topCustomers.length?topCustomers.map((x,i)=>`<div class="stats-list-row"><em>${i+1}</em><div><b>${statsEscape(x.c.name)}</b><small>${x.count} فاتورة</small></div><strong>${plainNum(x.sales)}</strong></div>`).join(''):`<div class="empty">لا توجد مبيعات مرتبطة بعملاء</div>`}</div>
@@ -5934,7 +6098,12 @@ function openDailyClosing(){
   const todaysInvoices = invoices.filter(i=>i.date.slice(0,10)===today);
   const salesTotal = todaysInvoices.reduce((a,i)=>a+i.total,0);
   const profitTotal = todaysInvoices.reduce((a,i)=>a+i.profit,0);
-  const cashCollected = todaysInvoices.reduce((a,i)=> a + (i.paymentMethod==='cash' ? i.total : (i.paidNow||0)), 0);
+  const cashFromInvoicesToday = todaysInvoices.reduce((a,i)=> a + (i.paymentMethod==='cash' ? i.total : (i.paidNow||0)), 0);
+  // تحصيل ديون قديمة اليوم (سداد من عميل على فاتورة من يوم سابق) هو نقد دخل جيبك اليوم فعليًا،
+  // لذلك يُحسب ضمن "نقد محصّل" حتى لو الفاتورة الأصلية ليست من اليوم.
+  const debtPaymentsToday = customerTx.filter(t=> t.type==='payment' && String(t.date).slice(0,10)===today)
+    .reduce((a,t)=>a+(t.amount||0),0);
+  const cashCollected = cashFromInvoicesToday + debtPaymentsToday;
   const newDebtToday = todaysInvoices.reduce((a,i)=> a + (i.remaining||0), 0);
   const expensesToday = expenses.filter(e=>e.date.slice(0,10)===today).reduce((a,e)=>a+e.amount,0);
   const netCash = cashCollected - expensesToday;
@@ -5971,6 +6140,7 @@ function openDailyClosing(){
       <div class="stat-card">
         <div class="v mono" style="color:var(--accent-b);">${plainNum(cashCollected)}</div>
         <div class="l">نقد محصّل</div>
+        ${debtPaymentsToday > 0 ? `<div class="row-sub" style="margin-top:4px;font-size:11px;">منها ${plainNum(debtPaymentsToday)} تحصيل ديون</div>` : ''}
       </div>
       <div class="stat-card">
         <div class="v mono" style="color:var(--alert);">${plainNum(newDebtToday)}</div>
@@ -6690,6 +6860,35 @@ function closeOverlay(){
   }
 }
 function closeOverlayIfBackdrop(e){ if(e.target.id==='overlay') closeOverlay(); }
+
+/* ================= رفع خانة البحث تلقائيًا فوق لوحة المفاتيح ================= */
+// عند النقر داخل أي خانة بحث (كل خانات البحث موحّدة داخل حاوية class="search-bar")،
+// ترتفع الصفحة تلقائيًا حتى تصبح الخانة أعلى الشاشة، لأن لوحة المفاتيح على الجوال
+// تأخذ نصف الشاشة تقريبًا وتُخفي نتائج البحث تحتها. نستخدم أكثر من محاولة توقيت
+// لأن حجم الشاشة الفعلي (visualViewport) يتغيّر بعد ظهور لوحة المفاتيح بقليل من الوقت،
+// وليس فورًا عند التركيز على الخانة.
+function scrollSearchBarIntoView(el){
+  if(!el) return;
+  const bar = el.closest('.search-bar');
+  const target = bar || el;
+  target.scrollIntoView({behavior:'smooth', block:'start'});
+}
+document.addEventListener('focusin', function(e){
+  const t = e.target;
+  if(!t || t.tagName !== 'INPUT') return;
+  if(!t.closest('.search-bar')) return;
+  scrollSearchBarIntoView(t);
+  setTimeout(()=>scrollSearchBarIntoView(t), 300);
+  setTimeout(()=>scrollSearchBarIntoView(t), 600);
+});
+if(window.visualViewport){
+  window.visualViewport.addEventListener('resize', function(){
+    const active = document.activeElement;
+    if(active && active.tagName === 'INPUT' && active.closest('.search-bar')){
+      scrollSearchBarIntoView(active);
+    }
+  });
+}
 
 window.addEventListener('popstate', function(e){
   const ov = document.getElementById('overlay');
