@@ -5953,27 +5953,39 @@ function openBackup(){
 }
 
 async function shareBackupFile(){
+  const data = {
+    exportedAt: new Date().toISOString(),
+    products, invoices, customers, customerTx, draftOrders, expenses, settings, suppliers, supplierTx, inventoryLog, compatGroups, compatDimensions
+  };
+  const jsonStr = JSON.stringify(data, null, 2);
+  const filename = 'نسخة-احتياطية-' + todayStr() + '.json';
+  // ملاحظة تقنية: بعض المتصفحات (خصوصًا على أندرويد) ترفض مشاركة ملفات بنوع
+  // "application/json" عبر نافذة المشاركة (Web Share API) حتى لو كانت المشاركة
+  // مدعومة بشكل عام، لأنها تحصر أنواع الملفات القابلة للمشاركة في قائمة محددة.
+  // "text/plain" مدعوم بشكل أوسع بكثير، ومحتوى JSON صالح كنص عادي، فنستعمله هنا
+  // بينما نُبقي امتداد الملف .json حتى يُستورد بشكل صحيح لاحقًا (الاستيراد يقرأ المحتوى لا الامتداد).
+  const file = new File([jsonStr], filename, { type: 'text/plain' });
+  const shareData = {
+    files: [file],
+    title: 'نسخة احتياطية — ' + (settings.shopName || 'المتجر'),
+    text: 'نسخة احتياطية من بيانات ' + (settings.shopName || 'المتجر') + ' بتاريخ ' + todayStr()
+  };
+  const canTryShare = !!(navigator.share && navigator.canShare && navigator.canShare(shareData));
+  if(!canTryShare){
+    showToast('المشاركة المباشرة غير مدعومة هنا، سيتم تنزيل الملف بدلاً منها');
+    exportBackup();
+    return;
+  }
   try{
-    const data = {
-      exportedAt: new Date().toISOString(),
-      products, invoices, customers, customerTx, draftOrders, expenses, settings, suppliers, supplierTx, inventoryLog, compatGroups, compatDimensions
-    };
-    const filename = 'نسخة-احتياطية-' + todayStr() + '.json';
-    const file = new File([JSON.stringify(data, null, 2)], filename, { type: 'application/json' });
-    if(navigator.canShare && navigator.canShare({ files: [file] })){
-      await navigator.share({
-        files: [file],
-        title: 'نسخة احتياطية — ' + (settings.shopName || 'المتجر'),
-        text: 'نسخة احتياطية من بيانات ' + (settings.shopName || 'المتجر') + ' بتاريخ ' + todayStr()
-      });
-      showToast('تم فتح نافذة المشاركة — اختر واتساب أو إيميل أو درايف');
-    }else{
-      showToast('المشاركة المباشرة غير مدعومة هنا، سيتم تنزيل الملف بدلاً منها');
-      exportBackup();
-    }
+    await navigator.share(shareData);
+    showToast('تم فتح نافذة المشاركة — اختر واتساب أو إيميل أو درايف');
   }catch(e){
     if(e && e.name === 'AbortError') return; // المستخدم أغلق نافذة المشاركة بدون اختيار
-    showToast('تعذّرت المشاركة، جرّب زر "تصدير" ثم أرسل الملف يدويًا');
+    // أي خطأ آخر (مثلاً تطبيق مشاركة معيّن رفض الملف): لا نترك التاجر بدون نسخة،
+    // ننزّل الملف محليًا مباشرة كبديل عملي. exportBackup تعرض توست خاص بها،
+    // فنستدعيها أولًا ثم نكتب فوقه رسالتنا التوضيحية.
+    exportBackup(true);
+    showToast('تعذّرت المشاركة المباشرة، تم تنزيل الملف بدلاً منها — أرسله يدويًا من مجلد التنزيلات');
   }
 }
 
