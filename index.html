@@ -2492,8 +2492,7 @@ function startOrderForCustomer(customerId){
   orderDraftMode = false;
   editingDraftOrderId = null;
   cart = {};
-  closeOverlay();
-  switchScreen('sell');
+  navigateFromCustomerOverlayToScreen('sell');
 }
 
 function startDraftOrderFlow(){
@@ -2510,8 +2509,24 @@ function startDraftOrderForCustomer(customerId){
   orderDraftMode = true;
   editingDraftOrderId = null;
   cart = {};
-  closeOverlay();
-  switchScreen('sell');
+  navigateFromCustomerOverlayToScreen('sell');
+}
+
+// الانتقال من تفاصيل العميل إلى شاشة البيع/تحضير الطلبية يجب أن يكون انتقالًا واحدًا.
+// لا نستعمل closeOverlay() ثم switchScreen() معًا، لأن history.back() غير متزامن وقد
+// يلغي/يتسابق مع pushState ويجعل زر "تحضير طلبية" يبدو وكأنه لا يعمل.
+function navigateFromCustomerOverlayToScreen(screenName){
+  const ov = document.getElementById('overlay');
+  if(ov) ov.classList.remove('active');
+  overlayHistoryPushed = false;
+  overlayCurrentView = null;
+  __restoringOverlayState = false;
+
+  // نستبدل حالة نافذة العميل الحالية بحالة الشاشة الجديدة؛ وبالتالي زر الرجوع
+  // سيعيد المستخدم إلى شاشة العملاء بدل إنشاء انتقالين متسابقين.
+  history.replaceState({screen: screenName}, '', location.href);
+  currentScreenState = screenName;
+  applyScreenSwitch(screenName);
 }
 
 function clearOrderCustomer(){
