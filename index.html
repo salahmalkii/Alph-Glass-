@@ -922,14 +922,21 @@ nav.no-print{display:none!important;}
     <div class="search-bar">
       <input type="text" id="posSearch" placeholder="ابحث عن صنف..." oninput="renderPos()">
     </div>
-    <div id="posDraftSelectedList"></div>
     <div class="chip-row" id="posChips"></div>
-    <div id="posList" style="padding-bottom:110px;"></div>
+    <div id="posList"></div>
+    <div id="posDraftSelectedList" style="padding-bottom:110px;"></div>
   </section>
 
   <!-- ===== INVOICES ===== -->
   <section class="screen" id="screen-invoices">
     <div class="section-title"><span>الفواتير السابقة</span></div>
+    <div class="stats-date-picker" style="margin-bottom:14px;">
+      <label>📅 عرض فواتير يوم معيّن</label>
+      <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;">
+        <input type="date" id="invoicesSelectedDate" onchange="setInvoicesDateFilter(this.value)" style="flex:1;min-width:180px;">
+        <button class="chip" onclick="clearInvoicesDateFilter()">كل الأيام</button>
+      </div>
+    </div>
     <div id="invoicesList"></div>
   </section>
 
@@ -3232,6 +3239,18 @@ function playSaleAlert(){
 }
 
 /* ================= Invoices list ================= */
+let invoicesDateFilter = null;
+function setInvoicesDateFilter(v){
+  invoicesDateFilter = v || null;
+  renderInvoices();
+}
+function clearInvoicesDateFilter(){
+  invoicesDateFilter = null;
+  const el = document.getElementById('invoicesSelectedDate');
+  if(el) el.value = '';
+  renderInvoices();
+}
+
 function invoiceDayLabel(dateKey){
   const today = todayStr();
   const y = new Date(); y.setDate(y.getDate()-1);
@@ -3247,11 +3266,16 @@ function renderInvoices(){
     list.innerHTML = `<div class="empty"><span class="big">📜</span>لا توجد فواتير بعد<div class="hint">ستظهر هنا فور إتمام أول عملية بيع</div></div>`;
     return;
   }
+  const filteredInvoices = invoicesDateFilter ? invoices.filter(inv=>String(inv.date).slice(0,10)===invoicesDateFilter) : invoices;
+  if(filteredInvoices.length === 0){
+    list.innerHTML = `<div class="empty"><span class="big">📭</span>لا توجد فواتير في هذا اليوم</div>`;
+    return;
+  }
   // تجميع الفواتير حسب اليوم — الفواتير مرتّبة أصلاً من الأحدث للأقدم، فيكفي تجميعها
   // بالترتيب دون إعادة فرز، مع عرض إجمالي مبيعات وعدد فواتير كل يوم في رأس المجموعة.
   const groups = [];
   let curKey = null, curGroup = null;
-  invoices.forEach(inv=>{
+  filteredInvoices.forEach(inv=>{
     const dateKey = String(inv.date).slice(0,10);
     if(dateKey !== curKey){
       curKey = dateKey;
@@ -3658,9 +3682,29 @@ async function deleteInvoice(invoiceId){
 }
 
 /* ================= Invoice editing (returns) ================= */
+let editDiscountType = null;
+let editDiscountValue = '';
+
+function setEditDiscountType(type){
+  editDiscountType = type;
+  editDiscountValue = '';
+  const chipsWrap = document.getElementById('editDiscountChips');
+  if(chipsWrap){
+    chipsWrap.querySelectorAll('.chip').forEach(c=>c.classList.remove('active'));
+    const btn = chipsWrap.querySelector(`[data-type="${type||'none'}"]`);
+    if(btn) btn.classList.add('active');
+  }
+  const fieldWrap = document.getElementById('editDiscountFieldWrap');
+  if(fieldWrap) fieldWrap.style.display = type ? '' : 'none';
+  const input = document.getElementById('edit-discount-value');
+  if(input) input.value = '';
+}
+
 function openInvoiceEditForm(invoiceId){
   const inv = invoices.find(x=>x.id===invoiceId);
   if(!inv) return;
+  editDiscountType = null;
+  editDiscountValue = '';
   const sheet = document.getElementById('sheetContent');
 
   const typeGroups = {};
@@ -3716,6 +3760,22 @@ function openInvoiceEditForm(invoiceId){
         </div>
       `;}).join('')}
     </div>
+    <div class="section-title"><span>خصم إضافي على الفاتورة (اختياري)</span></div>
+    <div class="chip-row" id="editDiscountChips" style="margin-bottom:${editDiscountType ? '8px' : '14px'};">
+      <button class="chip active" data-type="none" onclick="setEditDiscountType(null)">بدون خصم</button>
+      <button class="chip" data-type="percent" onclick="setEditDiscountType('percent')">نسبة %</button>
+      <button class="chip" data-type="fixed" onclick="setEditDiscountType('fixed')">مبلغ ثابت</button>
+    </div>
+    <div class="field" id="editDiscountFieldWrap" style="display:none;margin-bottom:14px;">
+      <label>${editDiscountType==='percent' ? 'نسبة الخصم %' : 'مبلغ الخصم'}</label>
+      <input type="number" inputmode="decimal" id="edit-discount-value" placeholder="0" min="0" step="0.01">
+    </div>
+    <div class="section-title"><span>الدفع (اختياري)</span></div>
+    <div class="field">
+      <label>المبلغ الذي دفعه الزبون فعليًا من هذه الفاتورة</label>
+      <input type="number" inputmode="decimal" id="edit-paid-now" placeholder="اتركه فارغًا = الفاتورة مدفوعة بالكامل">
+    </div>
+    <div class="row-sub" style="margin-bottom:14px;">إذا كتبت مبلغًا أقل من الإجمالي، سنسجّل الفرق كدين على الزبون (سنطلب اختيار الزبون إن لم تكن الفاتورة مرتبطة بأحد).</div>
     <div class="sheet-actions">
       <button class="btn btn-outline" onclick='showInvoicePreview(${JSON.stringify(inv).replace(/'/g,"&#39;")}, false)'>تراجع</button>
       <button class="btn btn-brass" onclick="saveInvoiceEditForm('${inv.id}')">حفظ التعديلات</button>
@@ -3743,7 +3803,7 @@ async function saveInvoiceEditForm(invoiceId){
   if(!inv) return;
 
   const newItems = [];
-  let total = 0, cost = 0;
+  let itemsTotal = 0, cost = 0;
   inv.items.forEach((it, idx)=>{
     const qtyInput = document.getElementById('edit-qty-' + idx);
     const priceInput = document.getElementById('edit-price-' + idx);
@@ -3758,7 +3818,7 @@ async function saveInvoiceEditForm(invoiceId){
       if(p) p.qty += diff;
     }
     if(newQty > 0){
-      total += newQty * newPrice;
+      itemsTotal += newQty * newPrice;
       cost += newQty * it.buyPrice;
       newItems.push({ ...it, qty: newQty, sellPrice: newPrice });
     }
@@ -3766,6 +3826,42 @@ async function saveInvoiceEditForm(invoiceId){
 
   if(newItems.length === 0){
     showToast('يجب أن يبقى صنف واحد على الأقل في الفاتورة');
+    return;
+  }
+  itemsTotal = Math.round((itemsTotal + Number.EPSILON) * 100) / 100;
+
+  // خصم إضافي على الفاتورة (اختياري) — نقرأه مباشرة من الواجهة وقت الحفظ
+  const activeChip = document.querySelector('#editDiscountChips .chip.active');
+  const discType = activeChip ? activeChip.dataset.type : 'none';
+  let discountAmount = 0;
+  if(discType === 'percent' || discType === 'fixed'){
+    const rawVal = parseFloat(document.getElementById('edit-discount-value')?.value);
+    let val = isNaN(rawVal) || rawVal < 0 ? 0 : rawVal;
+    if(discType === 'percent' && val > 100) val = 100;
+    discountAmount = discType === 'percent' ? itemsTotal * (val / 100) : val;
+    if(discountAmount > itemsTotal) discountAmount = itemsTotal;
+    discountAmount = Math.round((discountAmount + Number.EPSILON) * 100) / 100;
+  }
+  const total = Math.round((itemsTotal - discountAmount + Number.EPSILON) * 100) / 100;
+
+  // الدفع (اختياري): إن تُرك فارغًا نعتبر الفاتورة مدفوعة بالكامل كالمعتاد (السلوك القديم،
+  // بما فيه سؤال التاجر عن مصير أي فرق زائد). إن أُدخل مبلغ أقل من الإجمالي، نسجّل الفرق كدين صراحة.
+  const paidNowRaw = document.getElementById('edit-paid-now')?.value;
+  const hasPaidNowInput = paidNowRaw !== undefined && String(paidNowRaw).trim() !== '';
+
+  if(hasPaidNowInput){
+    let paidNowVal = parseFloat(paidNowRaw);
+    if(isNaN(paidNowVal) || paidNowVal < 0) paidNowVal = 0;
+    if(paidNowVal > total) paidNowVal = total;
+    const remaining = Math.round((total - paidNowVal + Number.EPSILON) * 100) / 100;
+
+    if(remaining > 0 && !inv.customerId){
+      pendingInvoiceEdit = { invoiceId, newItems, total, cost, oldTotal: inv.total, discountAmount, rawTotal: itemsTotal, paidNowOverride: paidNowVal };
+      openInvoiceEditDebtCustomerPrompt();
+      return;
+    }
+
+    await commitInvoiceEdit(invoiceId, newItems, total, cost, false, { paidNowOverride: paidNowVal, discountAmount, rawTotal: itemsTotal });
     return;
   }
 
@@ -3777,15 +3873,63 @@ async function saveInvoiceEditForm(invoiceId){
   // زائد استُلم فعلاً من الزبون. لا نفترض مصيره تلقائيًا (استرجاع نقد أم رصيد له)،
   // بل نسأل التاجر في كل مرة، حسب ما طلب.
   if(oldRemaining <= 0 && excess > 0){
-    pendingInvoiceEdit = { invoiceId, newItems, total, cost, oldTotal, excess };
+    pendingInvoiceEdit = { invoiceId, newItems, total, cost, oldTotal, excess, discountAmount, rawTotal: itemsTotal };
     openInvoiceEditExcessPrompt();
     return;
   }
 
-  await commitInvoiceEdit(invoiceId, newItems, total, cost, false);
+  await commitInvoiceEdit(invoiceId, newItems, total, cost, false, { discountAmount, rawTotal: itemsTotal });
 }
 
 let pendingInvoiceEdit = null;
+
+function openInvoiceEditDebtCustomerPrompt(){
+  const p = pendingInvoiceEdit;
+  if(!p) return;
+  const inv = invoices.find(x=>x.id===p.invoiceId);
+  if(!inv) return;
+  const remaining = Math.round((p.total - p.paidNowOverride + Number.EPSILON) * 100) / 100;
+  const sheet = document.getElementById('sheetContent');
+  const custOptions = customers.map(c=>`<option value="${c.id}">${escapeHtml(c.name)}</option>`).join('');
+  sheet.innerHTML = `
+    <div class="sheet-head">
+      <h3>اختر الزبون</h3>
+      <button class="icon-btn" onclick="cancelInvoiceEditDebt()">✕</button>
+    </div>
+    <div class="row-sub" style="margin-bottom:12px;">هذه الفاتورة غير مرتبطة بزبون. لتسجيل الباقي (${plainNum(remaining)} ${settings.currency}) كدين عليه، اختر الزبون.</div>
+    ${customers.length === 0 ? `<div class="empty">لا يوجد عملاء مسجّلون بعد — أضف عميلاً من شاشة العملاء أولاً</div>` : `
+    <div class="field">
+      <select id="editDebtCustSelect">
+        <option value="">— اختر —</option>
+        ${custOptions}
+      </select>
+    </div>
+    <div class="sheet-actions">
+      <button class="btn btn-outline" onclick="cancelInvoiceEditDebt()">تراجع</button>
+      <button class="btn btn-brass" onclick="confirmInvoiceEditDebtCustomer()">تأكيد</button>
+    </div>
+    `}
+  `;
+  openOverlay();
+}
+
+function cancelInvoiceEditDebt(){
+  const p = pendingInvoiceEdit;
+  pendingInvoiceEdit = null;
+  if(p) openInvoiceEditForm(p.invoiceId);
+}
+
+async function confirmInvoiceEditDebtCustomer(){
+  const id = document.getElementById('editDebtCustSelect')?.value;
+  if(!id){ showToast('اختر زبونًا'); return; }
+  const p = pendingInvoiceEdit;
+  if(!p) return;
+  const inv = invoices.find(x=>x.id===p.invoiceId);
+  if(!inv){ pendingInvoiceEdit = null; return; }
+  inv.customerId = id;
+  pendingInvoiceEdit = null;
+  await commitInvoiceEdit(p.invoiceId, p.newItems, p.total, p.cost, false, { paidNowOverride: p.paidNowOverride, discountAmount: p.discountAmount, rawTotal: p.rawTotal });
+}
 
 function openInvoiceEditExcessPrompt(){
   const p = pendingInvoiceEdit;
@@ -3800,12 +3944,12 @@ function openInvoiceEditExcessPrompt(){
       <button class="icon-btn" onclick="cancelInvoiceEditExcess()">✕</button>
     </div>
     <div class="row-sub" style="margin-bottom:16px;">
-      هذه الفاتورة كانت مدفوعة بالكامل (${plainNum(p.oldTotal)} ${settings.currency})، وبعد التعديل صار إجماليها ${plainNum(p.total)} ${settings.currency}
-      — أي أن هناك ${plainNum(p.excess)} ${settings.currency} مستلَمة فعلاً وزيادة عن المطلوب الآن.
-      ${cust ? `الزبون: ${escapeHtml(cust.name)}.` : ''} ماذا فعلت بهذا الفرق؟
+      هذه الفاتورة كانت مسجّلة مدفوعة بالكامل (${plainNum(p.oldTotal)} ${settings.currency})، وبعد التعديل صار إجماليها ${plainNum(p.total)} ${settings.currency}
+      — أي أن هناك فرق ${plainNum(p.excess)} ${settings.currency} بين المسجَّل والمطلوب الآن.
+      ${cust ? `الزبون: ${escapeHtml(cust.name)}.` : ''} شنو ديرت بهذا الفرق؟
     </div>
     <div class="sheet-actions" style="flex-direction:column;gap:10px;">
-      <button class="btn btn-brass btn-block" onclick="resolveInvoiceEditExcess('refund')">💵 أرجعته نقدًا للزبون الآن</button>
+      <button class="btn btn-brass btn-block" onclick="resolveInvoiceEditExcess('refund')">✅ ما فيه شيء إضافي (نقّص الفاتورة فقط — سامحته فيه، أو أرجعت له الفرق نقدًا)</button>
       <button class="btn btn-outline btn-block" onclick="resolveInvoiceEditExcess('credit')">💳 سجّله كرصيد له (يُخصم من مشترياته القادمة)</button>
     </div>
   `;
@@ -3827,7 +3971,7 @@ async function resolveInvoiceEditExcess(choice){
   if(choice === 'refund'){
     pendingInvoiceEdit = null;
     // استرجاع نقدي فقط: يخفّض إجمالي الفاتورة (وبالتالي "النقد المحصّل" تلقائيًا) بدون أي دين أو رصيد.
-    await commitInvoiceEdit(p.invoiceId, p.newItems, p.total, p.cost, true);
+    await commitInvoiceEdit(p.invoiceId, p.newItems, p.total, p.cost, true, { discountAmount: p.discountAmount, rawTotal: p.rawTotal });
     return;
   }
 
@@ -3879,12 +4023,13 @@ async function commitInvoiceEditExcessCredit(customerId){
   await Promise.all([saveCustomers(), saveCustomerTx()]);
   if(!inv.customerId) inv.customerId = c.id; // نربط الفاتورة بالزبون حتى يظهر الرصيد في سجله لاحقًا
   pendingInvoiceEdit = null;
-  await commitInvoiceEdit(p.invoiceId, p.newItems, p.total, p.cost, true);
+  await commitInvoiceEdit(p.invoiceId, p.newItems, p.total, p.cost, true, { discountAmount: p.discountAmount, rawTotal: p.rawTotal });
 }
 
-async function commitInvoiceEdit(invoiceId, newItems, total, cost, skipDeltaTx){
+async function commitInvoiceEdit(invoiceId, newItems, total, cost, skipDeltaTx, opts){
   const inv = invoices.find(x=>x.id===invoiceId);
   if(!inv) return;
+  opts = opts || {};
 
   const saveOps = [saveProducts()];
 
@@ -3892,7 +4037,7 @@ async function commitInvoiceEdit(invoiceId, newItems, total, cost, skipDeltaTx){
   // الزائد عبر نافذة الاختيار أعلاه (استرجاع/رصيد) نتخطى هذا الحساب لأنه عُولج صراحةً هناك.
   if(!skipDeltaTx){
     const oldRemaining = inv.remaining || 0;
-    const paidNow = inv.paidNow || 0;
+    const paidNow = (opts.paidNowOverride != null) ? opts.paidNowOverride : (inv.paidNow || 0);
     const newRemaining = Math.max(0, Math.round((total - paidNow + Number.EPSILON) * 100) / 100);
     const deltaRemaining = Math.round((oldRemaining - newRemaining + Number.EPSILON) * 100) / 100;
     if(deltaRemaining !== 0 && inv.customerId){
@@ -3910,12 +4055,15 @@ async function commitInvoiceEdit(invoiceId, newItems, total, cost, skipDeltaTx){
       }
     }
     if(inv.customerId) inv.remaining = newRemaining;
+    if(opts.paidNowOverride != null) inv.paidNow = paidNow;
   }
 
   inv.items = newItems;
   inv.total = total;
   inv.cost = cost;
   inv.profit = total - cost;
+  if(opts.discountAmount != null) inv.discountAmount = opts.discountAmount > 0 ? opts.discountAmount : 0;
+  if(opts.rawTotal != null) inv.rawTotal = opts.rawTotal;
   saveOps.push(saveInvoices());
 
   await Promise.all(saveOps);
@@ -4771,10 +4919,12 @@ function sharePurchaseListWhatsApp(){
 /* ================= Daily Sold Report ================= */
 let soldReportPeriod = 'day';
 
-function openDailySoldReport(period){
+let soldReportSelectedDate = todayStr();
+function openDailySoldReport(period, selectedDate){
+  if(period === 'selectedDay') soldReportSelectedDate = selectedDate || soldReportSelectedDate || todayStr();
   soldReportPeriod = period || soldReportPeriod || 'day';
   const sheet = document.getElementById('sheetContent');
-  const { curStart, curEnd, curLabel } = getPeriodRanges(soldReportPeriod);
+  const { curStart, curEnd, curLabel } = getPeriodRanges(soldReportPeriod, soldReportSelectedDate);
   const inv = invoices.filter(i=>{ const d = new Date(i.date); return d>=curStart && d<curEnd; });
 
   const soldByName = {};
@@ -4796,6 +4946,13 @@ function openDailySoldReport(period){
       <button class="chip ${soldReportPeriod==='week'?'active':''}" onclick="openDailySoldReport('week')">الأسبوع</button>
       <button class="chip ${soldReportPeriod==='month'?'active':''}" onclick="openDailySoldReport('month')">الشهر</button>
       <button class="chip ${soldReportPeriod==='all'?'active':''}" onclick="openDailySoldReport('all')">كل الفترة</button>
+    </div>
+    <div class="stats-date-picker" style="margin-bottom:14px;">
+      <label>📅 اختر يومًا معيّنًا</label>
+      <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;">
+        <input type="date" id="soldReportSelectedDate" value="${statsEscape(soldReportSelectedDate || todayStr())}" onchange="openDailySoldReport('selectedDay',this.value)" style="flex:1;min-width:180px;">
+        <button class="chip ${soldReportPeriod==='selectedDay'?'active':''}" onclick="openDailySoldReport('selectedDay',document.getElementById('soldReportSelectedDate')?.value || todayStr())">عرض اليوم المحدد</button>
+      </div>
     </div>
     <div class="row-sub" style="margin-bottom:14px;">${curLabel} — إجمالي ${totalPieces} قطعة من ${entries.length} صنف</div>
     ${entries.length === 0 ? `<div class="empty"><span class="big">📦</span>لا توجد مبيعات بهذي الفترة</div>` : `
@@ -5840,14 +5997,14 @@ function statsDateValue(d){
   return `${y}-${m}-${day}`;
 }
 
-function getPeriodRanges(period){
+function getPeriodRanges(period, dateOverride){
   const now = new Date();
   const startOfToday = new Date(now.getFullYear(), now.getMonth(), now.getDate());
   const endOfToday = new Date(startOfToday.getTime() + 24*60*60*1000);
   let curStart, curEnd, prevStart, prevEnd, curLabel, prevLabel;
 
   if(period === 'selectedDay'){
-    curStart = statsLocalDate(statsSelectedDate || todayStr());
+    curStart = statsLocalDate(dateOverride || statsSelectedDate || todayStr());
     curEnd = new Date(curStart.getTime() + 24*60*60*1000);
     prevStart = new Date(curStart.getTime() - 24*60*60*1000); prevEnd = curStart;
     const labelDate = curStart.toLocaleDateString('ar-DZ',{weekday:'long',year:'numeric',month:'long',day:'numeric'});
