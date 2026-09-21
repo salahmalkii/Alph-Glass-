@@ -1091,11 +1091,12 @@ let checkoutDiscountValue = '';
 let posCustomerId = null; // customer selected from Customers tab to build an order for
 let draftOrders = [];
 let expenses = [];
-const EXPENSE_CATEGORIES = ['شراء بضاعة','وقود','نقل ومواصلات','صيانة','كهرباء وماء','هاتف وإنترنت','إيجار','رواتب وأجور','تسويق وإعلانات','أدوات ومستلزمات','طعام وضيافة','رسوم وضرائب','أخرى'];
 function getExpenseCategories(){
+  // لا توجد أصناف افتراضية: تظهر فقط الأصناف التي أضافها المستخدم بنفسه.
   const custom = Array.isArray(settings.expenseCategories) ? settings.expenseCategories : [];
-  return [...new Set([...EXPENSE_CATEGORIES, ...custom.map(x=>String(x).trim()).filter(Boolean)])];
+  return [...new Set(custom.map(x=>String(x).trim()).filter(Boolean))];
 }
+
 let orderDraftMode = false; // true while building a draft order (not an immediate sale)
 let editingDraftOrderId = null; // set while fulfilling an existing draft order
 const CART_STEP = 10;
@@ -6649,7 +6650,7 @@ function openExpenseCategories(){
       <h3>تخصيص أصناف المصاريف</h3>
       <button class="icon-btn" onclick="openExpenses()">✕</button>
     </div>
-    <div class="row-sub" style="margin-bottom:12px;">أضف أصنافًا خاصة بمتجرك، وستظهر مباشرة عند إضافة مصروف جديد.</div>
+    <div class="row-sub" style="margin-bottom:12px;">لا توجد أصناف افتراضية. ستظهر هنا فقط الأصناف التي تضيفها أنت، وتبقى محفوظة عند تحديث التطبيق.</div>
     <div class="field">
       <label>اسم الصنف الجديد</label>
       <input type="text" id="newExpenseCategory" placeholder="مثال: تغليف وأكياس">
