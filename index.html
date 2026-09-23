@@ -1091,12 +1091,7 @@ let checkoutDiscountValue = '';
 let posCustomerId = null; // customer selected from Customers tab to build an order for
 let draftOrders = [];
 let expenses = [];
-function getExpenseCategories(){
-  // لا توجد أصناف افتراضية: تظهر فقط الأصناف التي أضافها المستخدم بنفسه.
-  const custom = Array.isArray(settings.expenseCategories) ? settings.expenseCategories : [];
-  return [...new Set(custom.map(x=>String(x).trim()).filter(Boolean))];
-}
-
+const EXPENSE_CATEGORIES = ['وقود','طعام','نقل ومواصلات','صيانة','فواتير واتصالات','إيجار','أخرى'];
 let orderDraftMode = false; // true while building a draft order (not an immediate sale)
 let editingDraftOrderId = null; // set while fulfilling an existing draft order
 const CART_STEP = 10;
@@ -1525,25 +1520,7 @@ function plainNum(n){
   const v = Math.round((n + Number.EPSILON) * 100) / 100;
   return v.toLocaleString('ar', {maximumFractionDigits:2});
 }
-function localDateKey(value){
-  if(value instanceof Date){
-    const d=value; const y=d.getFullYear(), m=String(d.getMonth()+1).padStart(2,'0'), day=String(d.getDate()).padStart(2,'0');
-    return `${y}-${m}-${day}`;
-  }
-  const raw=String(value||'');
-  if(/^\d{4}-\d{2}-\d{2}$/.test(raw)) return raw;
-  const d=new Date(raw);
-  if(Number.isNaN(d.getTime())) return '';
-  const y=d.getFullYear(), m=String(d.getMonth()+1).padStart(2,'0'), day=String(d.getDate()).padStart(2,'0');
-  return `${y}-${m}-${day}`;
-}
-function todayStr(){ return localDateKey(new Date()); }
-function localDateTimeInputValue(value){
-  const d = value ? new Date(value) : new Date();
-  if(Number.isNaN(d.getTime())) return '';
-  const pad=n=>String(n).padStart(2,'0');
-  return `${d.getFullYear()}-${pad(d.getMonth()+1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}`;
-}
+function todayStr(){ return new Date().toISOString().slice(0,10); }
 
 /* ===== حماية أرقام الفواتير + حساب النقد الفعلي ===== */
 function repairInvoiceNumbers(){
@@ -1897,7 +1874,7 @@ function renderHeaderStrip(){
   // البطاقات تختفي فقط أثناء "تحضير طلبية"، وتبقى ظاهرة في باقي الصفحات.
   if(strip) strip.style.display = orderDraftMode ? 'none' : 'flex';
   const t = todayStr();
-  const todays = invoices.filter(i=>localDateKey(i.date)===t);
+  const todays = invoices.filter(i=>i.date.slice(0,10)===t);
   const sales = todays.reduce((a,i)=>a+i.total,0);
   const profit = todays.reduce((a,i)=>a+i.profit,0);
   const salesEl = document.getElementById('todaySales');
@@ -3332,7 +3309,7 @@ function clearInvoicesDateFilter(){
 function invoiceDayLabel(dateKey){
   const today = todayStr();
   const y = new Date(); y.setDate(y.getDate()-1);
-  const yesterday = localDateKey(y);
+  const yesterday = y.toISOString().slice(0,10);
   if(dateKey === today) return 'اليوم';
   if(dateKey === yesterday) return 'أمس';
   return new Date(dateKey).toLocaleDateString('ar', {weekday:'long', year:'numeric', month:'long', day:'numeric'});
@@ -4381,8 +4358,8 @@ function renderProfits(){
   }
   const dayNames = ['أحد','اثنين','ثلاثاء','أربعاء','خميس','جمعة','سبت'];
   const dayProfits = days.map(d=>{
-    const key = localDateKey(d);
-    const sum = invoices.filter(inv=>localDateKey(inv.date)===key).reduce((a,i)=>a+i.profit,0);
+    const key = d.toISOString().slice(0,10);
+    const sum = invoices.filter(inv=>inv.date.slice(0,10)===key).reduce((a,i)=>a+i.profit,0);
     return { label: dayNames[d.getDay()], value: sum };
   });
   const max = Math.max(1, ...dayProfits.map(d=>d.value));
@@ -5889,7 +5866,7 @@ function buildCatalogText(type){
   }else{
     const isGlassType = type==='glass';
     items = products.filter(p=>(categoryLabel(p)==='زجاج حماية')===isGlassType && p.qty>0);
-    header = isGlassType ? '🛡 المتوفر حاليًا من زجاج الحماية:' : '🎧 المتوفر حاليًا من الإكسسوارات:';
+    header = isGlassType ? '📦 المتوفر حاليًا من زجاج الحماية:' : '🎧 المتوفر حاليًا من الإكسسوارات:';
   }
   if(items.length === 0) return null;
 
@@ -5899,48 +5876,80 @@ function buildCatalogText(type){
   lines.push('');
 
   if(type==='glass'){
-    const seenGlassNames = new Set();
-    const brandGroups = {};
-    items.forEach(p=>{
+    // ESD: مصنف حسب الشركة. UV: قائمة واحدة في الأسفل بدون تصنيف الشركات.
+    const esdBrandGroups = {};
+    const uvNames = [];
+    const seenEsd = new Set();
+    const seenUv = new Set();
+
+    const getGlassGroup = p => {
       let grp = p.compatGroupId ? compatGroups.find(g=>g.id===p.compatGroupId) : null;
-      if(!grp){
-        grp = compatGroups.find(g=>g.models.some(m => matchesModel(p.name, m)));
-      }
+      if(!grp) grp = compatGroups.find(g=>g.models.some(m => matchesModel(p.name, m)));
+      return grp;
+    };
+
+    items.forEach(p=>{
+      const grp = getGlassGroup(p);
       const namesToList = grp ? grp.models : [p.name];
-      const brandKey = p.brand || 'أخرى';
-      const typeKey = p.glassType ? (glassTypeLabel[p.glassType] || p.glassType) : 'أخرى';
+      const glassType = String(p.glassType || '').toLowerCase();
+
       namesToList.forEach(name=>{
-        const key = name.trim().toLowerCase();
-        if(seenGlassNames.has(key)) return;
-        seenGlassNames.add(key);
-        if(!brandGroups[brandKey]) brandGroups[brandKey] = {};
-        if(!brandGroups[brandKey][typeKey]) brandGroups[brandKey][typeKey] = [];
-        brandGroups[brandKey][typeKey].push({ name, isNew: !!p.isNew });
+        const cleanName = String(name || '').trim();
+        if(!cleanName) return;
+        const key = cleanName.toLowerCase();
+
+        if(glassType === 'uv'){
+          if(seenUv.has(key)) return;
+          seenUv.add(key);
+          uvNames.push({name: cleanName, isNew: !!p.isNew});
+          return;
+        }
+
+        // ESD أو النوع غير المحدد: يبقى ضمن تصنيف الشركة كما في القائمة التجارية.
+        if(seenEsd.has(key)) return;
+        seenEsd.add(key);
+        const brandKey = String(p.brand || 'أخرى').trim() || 'أخرى';
+        if(!esdBrandGroups[brandKey]) esdBrandGroups[brandKey] = [];
+        esdBrandGroups[brandKey].push({name: cleanName, isNew: !!p.isNew});
       });
     });
-    const brandNames = Object.keys(brandGroups).sort((a,b)=>{
+
+    lines.push('🔵 *ESD*');
+    lines.push('');
+
+    const brandIcon = brand => {
+      const b = String(brand || '').toLowerCase();
+      if(b.includes('apple') || b.includes('ايفون') || b.includes('أبل')) return '🍎';
+      if(b.includes('samsung') || b.includes('سامسون')) return '📱';
+      if(b.includes('honor') || b.includes('اونر')) return '⭐';
+      if(b.includes('xiaomi') || b.includes('redmi') || b.includes('شاومي')) return '🔴';
+      if(b.includes('oppo')) return '🟢';
+      if(b.includes('realme')) return '🟡';
+      if(b.includes('infinix')) return '📱';
+      if(b.includes('tecno')) return '⚡';
+      return '📱';
+    };
+
+    const brandNames = Object.keys(esdBrandGroups).sort((a,b)=>{
       if(a==='أخرى') return 1;
       if(b==='أخرى') return -1;
       return a.localeCompare(b);
     });
+
     brandNames.forEach(brand=>{
-      lines.push(`*📱 ${brand}*`);
-      const typeNames = Object.keys(brandGroups[brand]).sort((a,b)=>{
-        if(a==='أخرى') return 1;
-        if(b==='أخرى') return -1;
-        return a.localeCompare(b);
-      });
-      typeNames.forEach(typeKey=>{
-        if(typeKey !== 'أخرى') lines.push(`_${typeKey}_`);
-        brandGroups[brand][typeKey]
-          .sort((a,b)=> a.name.localeCompare(b.name, undefined, {numeric:true, sensitivity:'base'}))
-          .forEach(item=>{
-            lines.push(item.isNew ? `🆕 *${item.name}* (جديد!)` : `✅ ${item.name}`);
-          });
-      });
+      const models = esdBrandGroups[brand]
+        .sort((a,b)=>a.name.localeCompare(b.name, undefined, {numeric:true, sensitivity:'base'}));
+      lines.push(`${brandIcon(brand)} *━━ ${brand} ━━*`);
+      lines.push(models.map(item => item.isNew ? `🆕 *${item.name}*` : item.name).join('، '));
       lines.push('');
     });
-    if(lines[lines.length-1] === '') lines.pop();
+
+    if(uvNames.length){
+      lines.push('🟣 *UV*');
+      lines.push('');
+      uvNames.sort((a,b)=>a.name.localeCompare(b.name, undefined, {numeric:true, sensitivity:'base'}));
+      lines.push(uvNames.map(item => item.isNew ? `🆕 *${item.name}*` : item.name).join('، '));
+    }
   }else{
     items.forEach(p=>{
       if(type==='traders'){
@@ -5950,8 +5959,9 @@ function buildCatalogText(type){
       }
     });
   }
+
   lines.push('');
-  lines.push(type==='traders' ? 'الأسعار قابلة للنقاش حسب الكمية 📩' : 'راسلنا لأي استفسار 📩');
+  lines.push(type==='traders' ? '💰 السعر يتغير حسب الكمية 📩' : '💰 السعر يتغير حسب الكمية\n📦 للطلب بالجملة: أرسل الكمية المطلوبة');
   return lines.join('\n');
 }
 
@@ -6573,17 +6583,17 @@ function openMonthComparison(period, selectedDate){
 function openDailyClosing(){
   const sheet = document.getElementById('sheetContent');
   const today = todayStr();
-  const todaysInvoices = invoices.filter(i=>localDateKey(i.date)===today);
+  const todaysInvoices = invoices.filter(i=>i.date.slice(0,10)===today);
   const salesTotal = todaysInvoices.reduce((a,i)=>a+i.total,0);
   const profitTotal = todaysInvoices.reduce((a,i)=>a+i.profit,0);
   const cashFromInvoicesToday = todaysInvoices.reduce((a,i)=> a + (i.paymentMethod==='cash' ? i.total : (i.paidNow||0)), 0);
   // تحصيل ديون قديمة اليوم (سداد من عميل على فاتورة من يوم سابق) هو نقد دخل جيبك اليوم فعليًا،
   // لذلك يُحسب ضمن "نقد محصّل" حتى لو الفاتورة الأصلية ليست من اليوم.
-  const debtPaymentsToday = customerTx.filter(t=> isRealCashDebtPayment(t) && localDateKey(t.date)===today)
+  const debtPaymentsToday = customerTx.filter(t=> isRealCashDebtPayment(t) && String(t.date).slice(0,10)===today)
     .reduce((a,t)=>a+(Number(t.amount)||0),0);
   const cashCollected = cashFromInvoicesToday + debtPaymentsToday;
   const newDebtToday = todaysInvoices.reduce((a,i)=> a + (i.remaining||0), 0);
-  const expensesToday = expenses.filter(e=>localDateKey(e.date)===today).reduce((a,e)=>a+e.amount,0);
+  const expensesToday = expenses.filter(e=>e.date.slice(0,10)===today).reduce((a,e)=>a+e.amount,0);
   const netCash = cashCollected - expensesToday;
 
   const itemStats = {};
@@ -6659,78 +6669,19 @@ let expensesDateFilter = null;
 function setExpensesDateFilter(v){ expensesDateFilter = v || null; openExpenses(); }
 function clearExpensesDateFilter(){ expensesDateFilter = null; openExpenses(); }
 
-
-function openExpenseCategories(){
-  const sheet = document.getElementById('sheetContent');
-  const custom = Array.isArray(settings.expenseCategories) ? settings.expenseCategories : [];
-  sheet.innerHTML = `
-    <div class="sheet-head">
-      <h3>تخصيص أصناف المصاريف</h3>
-      <button class="icon-btn" onclick="openExpenses()">✕</button>
-    </div>
-    <div class="row-sub" style="margin-bottom:12px;">لا توجد أصناف افتراضية. ستظهر هنا فقط الأصناف التي تضيفها أنت، وتبقى محفوظة عند تحديث التطبيق.</div>
-    <div class="field">
-      <label>اسم الصنف الجديد</label>
-      <input type="text" id="newExpenseCategory" placeholder="مثال: تغليف وأكياس">
-    </div>
-    <button class="btn btn-brass btn-block" onclick="addExpenseCategory()">+ إضافة الصنف</button>
-    <div class="section-title" style="margin-top:18px;"><span>الأصناف المخصصة</span></div>
-    ${custom.length ? `<div class="ledger">${custom.map(c=>`
-      <div class="row">
-        <div class="row-main"><div class="row-name">${escapeHtml(c)}</div></div>
-        <button class="icon-btn" onclick="deleteExpenseCategory('${encodeURIComponent(c)}')">🗑</button>
-      </div>`).join('')}</div>` : `<div class="empty">لا توجد أصناف مخصصة بعد</div>`}
-  `;
-  openOverlay();
-}
-
-async function addExpenseCategory(){
-  const input = document.getElementById('newExpenseCategory');
-  const name = (input?.value || '').trim();
-  if(!name){ showToast('اكتب اسم الصنف'); return; }
-  const cats = Array.isArray(settings.expenseCategories) ? settings.expenseCategories : [];
-  if(getExpenseCategories().some(c=>c.toLowerCase()===name.toLowerCase())){ showToast('هذا الصنف موجود بالفعل'); return; }
-  settings.expenseCategories = [...cats, name];
-  await saveSettings();
-  openExpenseCategories();
-  showToast('تمت إضافة الصنف');
-}
-
-async function deleteExpenseCategory(encoded){
-  const name = decodeURIComponent(encoded || '');
-  const cats = Array.isArray(settings.expenseCategories) ? settings.expenseCategories : [];
-  settings.expenseCategories = cats.filter(c=>c!==name);
-  await saveSettings();
-  openExpenseCategories();
-  showToast('تم حذف الصنف');
-}
-
 function openExpenses(){
   const sheet = document.getElementById('sheetContent');
   const today = todayStr();
-  const todayTotal = expenses.filter(e=>localDateKey(e.date)===today).reduce((a,e)=>a+Number(e.amount||0),0);
-  const allTotal = expenses.reduce((a,e)=>a+Number(e.amount||0),0);
+  const todayTotal = expenses.filter(e=>e.date.slice(0,10)===today).reduce((a,e)=>a+e.amount,0);
+  const allTotal = expenses.reduce((a,e)=>a+e.amount,0);
   const sorted = [...expenses].sort((a,b)=> new Date(b.date)-new Date(a.date));
-  const filtered = expensesDateFilter ? sorted.filter(e=>localDateKey(e.date)===expensesDateFilter) : sorted;
-  const filteredTotal = filtered.reduce((a,e)=>a+Number(e.amount||0),0);
-  const uniqueDays = new Set(filtered.map(e=>localDateKey(e.date))).size;
-  const avgDay = uniqueDays ? filteredTotal / uniqueDays : 0;
-  const avgExpense = filtered.length ? filteredTotal / filtered.length : 0;
-  const maxExpense = filtered.length ? Math.max(...filtered.map(e=>Number(e.amount||0))) : 0;
+  const filtered = expensesDateFilter ? sorted.filter(e=>String(e.date).slice(0,10)===expensesDateFilter) : sorted;
 
-  const categoryStats = {};
-  filtered.forEach(e=>{
-    const c = e.category || 'أخرى';
-    if(!categoryStats[c]) categoryStats[c] = {total:0,count:0};
-    categoryStats[c].total += Number(e.amount||0);
-    categoryStats[c].count++;
-  });
-  const categoryList = Object.entries(categoryStats).sort((a,b)=>b[1].total-a[1].total);
-
+  // إحصائيات المصاريف يوميًا: تجميع كل المصاريف حسب اليوم مع مجموع كل يوم، لعرض اتجاه الصرف عبر الأيام.
   const dayGroups = {};
   const dayOrder = [];
   filtered.forEach(e=>{
-    const key = localDateKey(e.date);
+    const key = String(e.date).slice(0,10);
     if(!dayGroups[key]){ dayGroups[key] = []; dayOrder.push(key); }
     dayGroups[key].push(e);
   });
@@ -6741,43 +6692,46 @@ function openExpenses(){
       <button class="icon-btn" onclick="closeOverlay()">✕</button>
     </div>
     <div class="stat-grid">
-      <div class="stat-card"><div class="v mono" style="color:var(--alert);">${plainNum(todayTotal)}</div><div class="l">مصاريف اليوم</div></div>
-      <div class="stat-card"><div class="v mono" style="color:var(--alert);">${plainNum(allTotal)}</div><div class="l">إجمالي كل المصاريف</div></div>
+      <div class="stat-card">
+        <div class="v mono" style="color:var(--alert);">${plainNum(todayTotal)}</div>
+        <div class="l">مصاريف اليوم</div>
+      </div>
+      <div class="stat-card">
+        <div class="v mono" style="color:var(--alert);">${plainNum(allTotal)}</div>
+        <div class="l">إجمالي المصاريف</div>
+      </div>
     </div>
-    <div class="sheet-actions" style="margin-bottom:10px;">
+    <div class="sheet-actions" style="margin-bottom:16px;">
       <button class="btn btn-brass btn-block" onclick="openExpenseForm()">+ إضافة مصروف</button>
-      <button class="btn btn-outline btn-block" onclick="openExpenseCategories()" style="margin-top:8px;">⚙ تخصيص أصناف المصاريف</button>
     </div>
-    <div class="section-title"><span>إحصائيات المصاريف</span><span>${expensesDateFilter ? 'اليوم المحدد' : 'كل الأيام'}</span></div>
+    <div class="section-title"><span>إحصائيات المصاريف حسب اليوم</span></div>
     <div class="stats-date-picker" style="margin-bottom:14px;">
       <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;">
         <input type="date" id="expensesSelectedDate" value="${expensesDateFilter ? statsEscape(expensesDateFilter) : ''}" onchange="setExpensesDateFilter(this.value)" style="flex:1;min-width:180px;">
         <button class="chip" onclick="clearExpensesDateFilter()">كل الأيام</button>
       </div>
     </div>
-    <div class="stat-grid">
-      <div class="stat-card"><div class="v mono">${plainNum(filteredTotal)}</div><div class="l">إجمالي الفترة</div></div>
-      <div class="stat-card"><div class="v mono">${plainNum(avgDay)}</div><div class="l">متوسط المصروف في اليوم</div></div>
-      <div class="stat-card"><div class="v mono">${plainNum(avgExpense)}</div><div class="l">متوسط العملية</div></div>
-      <div class="stat-card"><div class="v mono" style="color:var(--alert);">${plainNum(maxExpense)}</div><div class="l">أكبر مصروف</div></div>
-    </div>
-    ${categoryList.length ? `
-      <div class="section-title"><span>توزيع المصاريف حسب الصنف</span></div>
-      <div class="ledger" style="margin-bottom:14px;">
-        ${categoryList.map(([cat,s])=>{
-          const pct = filteredTotal ? (s.total/filteredTotal*100) : 0;
-          return `<div class="row"><div class="row-main"><div class="row-name">${escapeHtml(cat)}</div><div class="row-sub">${s.count} عملية · ${pct.toFixed(1)}%</div></div><div class="mono" style="font-weight:700;color:var(--alert);">${plainNum(s.total)}</div></div>`;
-        }).join('')}
-      </div>` : ''}
-    <div class="section-title"><span>إحصائيات المصاريف حسب اليوم</span></div>
     ${dayOrder.length === 0 ? `<div class="empty" style="padding:24px;">${expensesDateFilter ? 'لا توجد مصاريف في هذا اليوم' : 'لا توجد مصاريف مسجلة بعد'}</div>` : dayOrder.map(dayKey=>{
       const dayItems = dayGroups[dayKey];
-      const dayTotal = dayItems.reduce((a,e)=>a+Number(e.amount||0),0);
-      return `<div class="section-title" style="margin-top:10px;"><span>${invoiceDayLabel(dayKey)}</span><span class="mono" style="color:var(--alert);font-weight:700;">${plainNum(dayTotal)}</span></div>
-      <div class="ledger" style="margin-bottom:6px;">${dayItems.map(e=>{
-        const d = new Date(e.date); const timeStr = d.toLocaleTimeString('ar',{hour:'2-digit',minute:'2-digit'});
-        return `<div class="row"><div class="row-main"><div class="row-name">${escapeHtml(e.category||'أخرى')}${e.note ? ' — '+escapeHtml(e.note) : ''}</div><div class="row-sub">${timeStr}</div></div><div class="mono" style="font-weight:700;color:var(--alert);">${plainNum(e.amount)}</div><button class="icon-btn" onclick="openExpenseEdit('${e.id}')">✏️</button><button class="icon-btn" onclick="deleteExpense('${e.id}')">🗑</button></div>`;
-      }).join('')}</div>`;
+      const dayTotal = dayItems.reduce((a,e)=>a+e.amount,0);
+      return `
+      <div class="section-title" style="margin-top:10px;"><span>${invoiceDayLabel(dayKey)}</span><span class="mono" style="color:var(--alert);font-weight:700;">${plainNum(dayTotal)}</span></div>
+      <div class="ledger" style="margin-bottom:6px;">
+        ${dayItems.map(e=>{
+          const d = new Date(e.date);
+          const timeStr = d.toLocaleTimeString('ar', {hour:'2-digit', minute:'2-digit'});
+          return `
+          <div class="row">
+            <div class="row-main">
+              <div class="row-name">${escapeHtml(e.category)}${e.note ? ' — ' + escapeHtml(e.note) : ''}</div>
+              <div class="row-sub">${timeStr}</div>
+            </div>
+            <div class="mono" style="font-weight:700;color:var(--alert);">${plainNum(e.amount)}</div>
+            <button class="icon-btn" onclick="deleteExpense('${e.id}')">🗑</button>
+          </div>`;
+        }).join('')}
+      </div>
+      `;
     }).join('')}
   `;
   openOverlay();
@@ -6791,17 +6745,13 @@ function openExpenseForm(){
       <button class="icon-btn" onclick="openExpenses()">✕</button>
     </div>
     <div class="field">
-      <label>التاريخ والوقت</label>
-      <input type="datetime-local" id="ex-date" value="${localDateTimeInputValue(new Date())}">
-    </div>
-    <div class="field">
       <label>المبلغ</label>
       <input type="number" inputmode="decimal" id="ex-amount" placeholder="0.00">
     </div>
     <div class="field">
       <label>الصنف</label>
       <select id="ex-category">
-        ${getExpenseCategories().map(c=>`<option value="${escapeHtml(c)}">${escapeHtml(c)}</option>`).join('')}
+        ${EXPENSE_CATEGORIES.map(c=>`<option value="${c}">${c}</option>`).join('')}
       </select>
     </div>
     <div class="field">
@@ -6819,54 +6769,13 @@ async function saveExpenseForm(){
   const amount = parseFloat(document.getElementById('ex-amount').value);
   const category = document.getElementById('ex-category').value;
   const note = document.getElementById('ex-note').value.trim();
-  const dateValue = document.getElementById('ex-date').value;
   if(isNaN(amount) || amount <= 0){ showToast('أدخل مبلغًا صحيحًا'); return; }
-  if(!dateValue){ showToast('اختر التاريخ والوقت'); return; }
-  const date = new Date(dateValue);
-  if(Number.isNaN(date.getTime())){ showToast('التاريخ غير صحيح'); return; }
 
-  expenses.unshift({ id: uid(), amount, category, note, date: date.toISOString() });
+  expenses.unshift({ id: uid(), amount, category, note, date: new Date().toISOString() });
   await saveExpenses();
   renderProfits();
   openExpenses();
   showToast('تم تسجيل المصروف');
-}
-
-function openExpenseEdit(id){
-  const e = expenses.find(x=>x.id===id);
-  if(!e){ showToast('المصروف غير موجود'); return; }
-  const sheet = document.getElementById('sheetContent');
-  const cats = getExpenseCategories();
-  const currentCat = String(e.category||'');
-  const options = [...new Set([currentCat, ...cats].filter(Boolean))];
-  sheet.innerHTML = `
-    <div class="sheet-head">
-      <h3>تعديل المصروف</h3>
-      <button class="icon-btn" onclick="openExpenses()">✕</button>
-    </div>
-    <div class="field"><label>التاريخ والوقت</label><input type="datetime-local" id="edit-ex-date" value="${localDateTimeInputValue(e.date)}"></div>
-    <div class="field"><label>المبلغ</label><input type="number" inputmode="decimal" id="edit-ex-amount" value="${Number(e.amount)||0}"></div>
-    <div class="field"><label>الصنف</label><select id="edit-ex-category">${options.map(c=>`<option value="${escapeHtml(c)}" ${c===currentCat?'selected':''}>${escapeHtml(c)}</option>`).join('')}</select></div>
-    <div class="field"><label>ملاحظة (اختياري)</label><input type="text" id="edit-ex-note" value="${escapeHtml(e.note||'')}"></div>
-    <div class="sheet-actions"><button class="btn btn-outline" onclick="openExpenses()">تراجع</button><button class="btn btn-brass" onclick="saveExpenseEdit('${e.id}')">حفظ التعديل</button></div>
-  `;
-}
-
-async function saveExpenseEdit(id){
-  const e = expenses.find(x=>x.id===id);
-  if(!e) return;
-  const amount=parseFloat(document.getElementById('edit-ex-amount').value);
-  const category=document.getElementById('edit-ex-category').value;
-  const note=document.getElementById('edit-ex-note').value.trim();
-  const dateValue=document.getElementById('edit-ex-date').value;
-  const date=new Date(dateValue);
-  if(!Number.isFinite(amount) || amount<=0){ showToast('أدخل مبلغًا صحيحًا'); return; }
-  if(!dateValue || Number.isNaN(date.getTime())){ showToast('التاريخ غير صحيح'); return; }
-  e.amount=amount; e.category=category; e.note=note; e.date=date.toISOString();
-  await saveExpenses();
-  renderProfits();
-  openExpenses();
-  showToast('تم تعديل المصروف');
 }
 
 async function deleteExpense(id){
