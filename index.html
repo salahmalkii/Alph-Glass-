@@ -1168,7 +1168,20 @@ function categoryLabel(p){
   const c = p.category || 'other';
   return catLabel[c] || c;
 }
-const glassTypeLabel = { esd: 'ESD', uv: 'UV', bordure: 'SANS BORDURE', fume: 'مدخّن' };
+const glassTypeLabel = {
+  esd: 'ESD', uv: 'UV', bordure: 'SANS BORDURE', fume: 'مدخّن',
+  ESD: 'ESD', UV: 'UV',
+  'SANS BORDURE': 'SANS BORDURE', 'SANS BORDURES': 'SANS BORDURE',
+  'بدون حواف': 'SANS BORDURE'
+};
+function normalizeGlassType(value){
+  const v = String(value || '').trim().toLowerCase();
+  if(v === 'esd') return 'esd';
+  if(v === 'uv') return 'uv';
+  if(v === 'bordure' || v === 'sans bordure' || v === 'sans bordures' || v === 'بدون حواف') return 'bordure';
+  if(v === 'fume' || v === 'fumé' || v === 'مدخّن') return 'fume';
+  return v;
+}
 
 function setInvFilter(cat){
   invFilter = cat;
@@ -1911,7 +1924,7 @@ function renderInventory(){
   let glassNoType = 0;
   glassProducts.forEach(p=>{
     if(!p.glassType){ glassNoType += p.qty; return; }
-    const label = glassTypeLabel[p.glassType] || p.glassType;
+    const label = glassTypeLabel[p.glassType] || glassTypeLabel[normalizeGlassType(p.glassType)] || p.glassType;
     glassByType[label] = (glassByType[label] || 0) + p.qty;
   });
   const glassTypeEntries = Object.entries(glassByType).sort((a,b)=> b[1]-a[1]);
@@ -1983,7 +1996,7 @@ function renderInventory(){
     const typeKey = String(invFilter).slice('glassType:'.length);
     filtered = typeKey === 'none'
       ? products.filter(p=>categoryLabel(p)==='زجاج حماية' && !p.glassType)
-      : products.filter(p=>categoryLabel(p)==='زجاج حماية' && String(p.glassType||'').toLowerCase()===typeKey.toLowerCase());
+      : products.filter(p=>categoryLabel(p)==='زجاج حماية' && normalizeGlassType(p.glassType)===normalizeGlassType(typeKey));
   }else{
     filtered = products.filter(p=>categoryLabel(p)===invFilter);
   }
@@ -2504,7 +2517,7 @@ async function saveProductForm(){
   const category = document.getElementById('f-cat').value.trim() || 'أخرى';
   const compatGroupId = document.getElementById('f-group').value || null;
   const brand = document.getElementById('f-brand').value.trim() || null;
-  const glassType = (category === 'glass' || category === 'زجاج حماية') ? (document.getElementById('f-glasstype').value.trim() || null) : null;
+  const glassType = (category === 'glass' || category === 'زجاج حماية') ? (normalizeGlassType(document.getElementById('f-glasstype').value) || null) : null;
   const isNew = document.getElementById('f-isnew').checked;
   const dimLength = parseFloat(document.getElementById('f-dim-length')?.value);
   const dimWidth = parseFloat(document.getElementById('f-dim-width')?.value);
@@ -3021,7 +3034,7 @@ function buildCheckoutSheet(){
   ids.forEach(id=>{
     const p = products.find(x=>x.id===id);
     if(p && p.glassType){
-      const typeLabel = glassTypeLabel[p.glassType] || p.glassType;
+      const typeLabel = glassTypeLabel[p.glassType] || glassTypeLabel[normalizeGlassType(p.glassType)] || p.glassType;
       checkoutTypeGroups[typeLabel] = (checkoutTypeGroups[typeLabel] || 0) + 1;
       checkoutTypeQty[typeLabel] = (checkoutTypeQty[typeLabel] || 0) + cart[id];
     }
@@ -3965,7 +3978,7 @@ function renderInvoiceEditSheet(focusSearch){
     <div class="ledger" style="margin-bottom:14px;">
       ${st.items.map((it,idx)=>{
         const p=it.productId ? products.find(x=>x.id===it.productId) : null;
-        const typeLabel=p?.glassType ? (glassTypeLabel[p.glassType]||p.glassType) : '';
+        const typeLabel=p?.glassType ? (glassTypeLabel[p.glassType]||glassTypeLabel[normalizeGlassType(p.glassType)]||p.glassType) : '';
         return `<div class="row" style="align-items:center;gap:7px;">
           <div class="row-main" style="min-width:0;"><div class="row-name">${escapeHtml(it.name||p?.name||'صنف')}</div><div class="row-sub">${typeLabel ? typeLabel+' — ' : ''}السعر للوحدة</div></div>
           <input type="number" inputmode="numeric" min="0" value="${it.qty}" onchange="updateInvoiceEditQty(${idx},this.value)" style="width:58px;padding:8px 4px;text-align:center;border-radius:8px;border:1px solid var(--border-strong);background:var(--surface-soft);color:var(--text);">
@@ -5909,7 +5922,7 @@ function buildCatalogText(type){
     items.forEach(p=>{
       const grp = getGlassGroup(p);
       const namesToList = grp ? grp.models : [p.name];
-      const glassType = String(p.glassType || '').toLowerCase();
+      const glassType = normalizeGlassType(p.glassType);
 
       namesToList.forEach(name=>{
         const cleanName = String(name || '').trim();
