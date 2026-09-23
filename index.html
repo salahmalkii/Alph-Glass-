@@ -1922,18 +1922,22 @@ function renderInventory(){
     breakdownEl.innerHTML = catEntries.map(([label, qty])=>{
       const icon = catIcon[label] || '🏷';
       const isGlass = label === 'زجاج حماية';
+      const catFilter = label === 'زجاج حماية' ? 'زجاج حماية' : label;
       return `
-      <div class="row">
+      <div class="row" style="cursor:pointer;" onclick="setInvFilter(${JSON.stringify(catFilter)})">
         <div class="row-main"><div class="row-name">${icon} ${escapeHtml(label)}</div></div>
         <div class="qty-pill">${qty} قطعة</div>
       </div>
-      ${isGlass ? glassTypeEntries.map(([t, tq])=>`
-      <div class="row" style="padding-right:26px;">
+      ${isGlass ? glassTypeEntries.map(([t, tq])=>{
+        const typeKey = Object.keys(glassTypeLabel).find(k => glassTypeLabel[k] === t) || '';
+        return `
+      <div class="row" style="padding-right:26px;cursor:pointer;" onclick="setInvFilter(${JSON.stringify(typeKey ? 'glassType:'+typeKey : '')})">
         <div class="row-main"><div class="row-sub">${escapeHtml(t)}</div></div>
         <div class="mono" style="font-weight:700;">${tq}</div>
-      </div>`).join('') : ''}
+      </div>`;
+      }).join('') : ''}
       ${isGlass && glassNoType > 0 ? `
-      <div class="row" style="padding-right:26px;">
+      <div class="row" style="padding-right:26px;cursor:pointer;" onclick="setInvFilter('glassType:none')">
         <div class="row-main"><div class="row-sub">بدون نوع محدد</div></div>
         <div class="mono" style="font-weight:700;">${glassNoType}</div>
       </div>` : ''}
@@ -1970,7 +1974,19 @@ function renderInventory(){
   }
   const q = (document.getElementById('invSearch')?.value || '').trim().toLowerCase();
   const brandFilter = document.getElementById('invBrandFilter')?.value || '';
-  let filtered = invFilter==='all' ? products : (invFilter==='low' ? products.filter(p=>p.qty<=LOW_STOCK_THRESHOLD) : products.filter(p=>categoryLabel(p)===invFilter));
+  let filtered;
+  if(invFilter==='all'){
+    filtered = products;
+  }else if(invFilter==='low'){
+    filtered = products.filter(p=>p.qty<=LOW_STOCK_THRESHOLD);
+  }else if(String(invFilter).startsWith('glassType:')){
+    const typeKey = String(invFilter).slice('glassType:'.length);
+    filtered = typeKey === 'none'
+      ? products.filter(p=>categoryLabel(p)==='زجاج حماية' && !p.glassType)
+      : products.filter(p=>categoryLabel(p)==='زجاج حماية' && String(p.glassType||'').toLowerCase()===typeKey.toLowerCase());
+  }else{
+    filtered = products.filter(p=>categoryLabel(p)===invFilter);
+  }
   if(brandFilter) filtered = filtered.filter(p=>p.brand===brandFilter);
   const invBasePool = filtered;
 
