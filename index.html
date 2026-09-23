@@ -5876,11 +5876,11 @@ function buildCatalogText(type){
   lines.push('');
 
   if(type==='glass'){
-    // SANS BORDS: قائمة مستقلة. ESD: حسب الشركة. UV: قائمة واحدة.
-    const noBorderNames = [];
+    // ESD: مصنف حسب الشركة. UV: قائمة واحدة في الأسفل بدون تصنيف الشركات.
+    const sansBordsNames = [];
     const esdBrandGroups = {};
     const uvNames = [];
-    const seenNoBorder = new Set();
+    const seenSansBords = new Set();
     const seenEsd = new Set();
     const seenUv = new Set();
 
@@ -5900,6 +5900,13 @@ function buildCatalogText(type){
         if(!cleanName) return;
         const key = cleanName.toLowerCase();
 
+        if(glassType === 'bordure'){
+          if(seenSansBords.has(key)) return;
+          seenSansBords.add(key);
+          sansBordsNames.push({name: cleanName, isNew: !!p.isNew});
+          return;
+        }
+
         if(glassType === 'uv'){
           if(seenUv.has(key)) return;
           seenUv.add(key);
@@ -5907,14 +5914,7 @@ function buildCatalogText(type){
           return;
         }
 
-        if(glassType === 'bordure'){
-          if(seenNoBorder.has(key)) return;
-          seenNoBorder.add(key);
-          noBorderNames.push({name: cleanName, isNew: !!p.isNew});
-          return;
-        }
-
-        // ESD أو النوع غير المحدد: يبقى ضمن تصنيف الشركة.
+        // ESD أو النوع غير المحدد: يبقى ضمن تصنيف الشركة كما في القائمة التجارية.
         if(seenEsd.has(key)) return;
         seenEsd.add(key);
         const brandKey = String(p.brand || 'أخرى').trim() || 'أخرى';
@@ -5923,18 +5923,16 @@ function buildCatalogText(type){
       });
     });
 
-    const joinModels = list => list
-      .sort((a,b)=>a.name.localeCompare(b.name, undefined, {numeric:true, sensitivity:'base'}))
-      .map(item => item.isNew ? `🆕 *${item.name}*` : item.name)
-      .join(' / ');
-
-    if(noBorderNames.length){
+    if(sansBordsNames.length){
       lines.push('📱 *━━ SANS BORDS ━━*');
-      lines.push(joinModels(noBorderNames));
+      lines.push(sansBordsNames
+        .sort((a,b)=>a.name.localeCompare(b.name, undefined, {numeric:true, sensitivity:'base'}))
+        .map(item => item.isNew ? `🆕 *${item.name}*` : item.name)
+        .join(' / '));
       lines.push('');
     }
 
-    lines.push('📦 *━━ ESD ━━*');
+    lines.push('🔵 *ESD*');
     lines.push('');
 
     const brandIcon = brand => {
@@ -5957,15 +5955,18 @@ function buildCatalogText(type){
     });
 
     brandNames.forEach(brand=>{
+      const models = esdBrandGroups[brand]
+        .sort((a,b)=>a.name.localeCompare(b.name, undefined, {numeric:true, sensitivity:'base'}));
       lines.push(`${brandIcon(brand)} *━━ ${brand} ━━*`);
-      lines.push(joinModels(esdBrandGroups[brand]));
+      lines.push(models.map(item => item.isNew ? `🆕 *${item.name}*` : item.name).join(' / '));
       lines.push('');
     });
 
     if(uvNames.length){
-      lines.push('🟣 *━━ UV ━━*');
-      lines.push(joinModels(uvNames));
+      lines.push('🟣 *UV*');
       lines.push('');
+      uvNames.sort((a,b)=>a.name.localeCompare(b.name, undefined, {numeric:true, sensitivity:'base'}));
+      lines.push(uvNames.map(item => item.isNew ? `🆕 *${item.name}*` : item.name).join(' / '));
     }
   }else{
     items.forEach(p=>{
@@ -5977,8 +5978,8 @@ function buildCatalogText(type){
     });
   }
 
-  lines.push('💰 السعر يتغير حسب الكمية');
-  lines.push('📦 للطلب بالجملة: أرسل الكمية المطلوبة');
+  lines.push('');
+  lines.push(type==='traders' ? '💰 السعر يتغير حسب الكمية 📩' : '💰 السعر يتغير حسب الكمية\n📦 للطلب بالجملة: أرسل الكمية المطلوبة');
   return lines.join('\n');
 }
 
