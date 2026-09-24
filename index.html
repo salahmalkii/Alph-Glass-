@@ -866,29 +866,24 @@ nav.no-print{display:none!important;}
       <span>المخزون</span>
       <span id="invCount" class="mono">0 صنف</span>
     </div>
-    <div id="invSummarySection">
-      <div class="stat-grid">
-        <div class="stat-card" id="invCostCard">
-          <div class="v mono" id="statInvCost">0</div>
-          <div class="l">قيمة المخزون (تكلفة)</div>
-        </div>
-        <div class="stat-card profit">
-          <div class="v mono" id="statInvSaleValue">0</div>
-          <div class="l">القيمة عند البيع</div>
-        </div>
+    <div class="stat-grid">
+      <div class="stat-card" id="invCostCard">
+        <div class="v mono" id="statInvCost">0</div>
+        <div class="l">قيمة المخزون (تكلفة)</div>
       </div>
-      <div class="stat-grid">
-        <div class="stat-card" style="flex:1 1 100%;">
-          <div class="v mono" id="statInvTotalPieces">0</div>
-          <div class="l">إجمالي عدد القطع بالمخزون</div>
-        </div>
+      <div class="stat-card profit">
+        <div class="v mono" id="statInvSaleValue">0</div>
+        <div class="l">القيمة عند البيع</div>
       </div>
-      <div class="section-title"><span>تفصيل القطع حسب الفئة</span></div>
-      <div class="ledger" id="invPiecesBreakdown" style="margin-bottom:14px;"></div>
     </div>
-    <div class="row" id="invFilterActiveBar" style="display:none;cursor:pointer;margin-bottom:10px;" onclick="setInvFilter('all')">
-      <div class="row-main"><div class="row-name">‹ رجوع لكل الأصناف</div><div class="row-sub" id="invFilterActiveLabel"></div></div>
+    <div class="stat-grid">
+      <div class="stat-card" style="flex:1 1 100%;">
+        <div class="v mono" id="statInvTotalPieces">0</div>
+        <div class="l">إجمالي عدد القطع بالمخزون</div>
+      </div>
     </div>
+    <div class="section-title"><span>تفصيل القطع حسب الفئة</span></div>
+    <div class="ledger" id="invPiecesBreakdown" style="margin-bottom:14px;"></div>
     <div class="chip-row" id="invChips"></div>
     <div class="field" id="invBrandFilterWrap" style="margin-bottom:14px;display:none;">
       <label>تصفية حسب الشركة</label>
@@ -1189,9 +1184,38 @@ function normalizeGlassType(value){
 }
 
 function setInvFilter(cat){
-  invFilter = cat;
-  document.querySelectorAll('#invChips .chip').forEach(c=>c.classList.toggle('active', c.dataset.cat===cat));
+  // Inventory filters: normalize category and glass type values first.
+  let next = String(cat == null ? 'all' : cat).trim();
+
+  // Accept both direct labels and internal glassType keys.
+  if(next.toLowerCase().startsWith('glasstype:')){
+    const rawType = next.slice(next.indexOf(':') + 1).trim();
+    next = 'glassType:' + (rawType.toLowerCase() === 'none' ? 'none' : normalizeGlassType(rawType));
+  }else{
+    const normalizedType = normalizeGlassType(next);
+    if(['esd','uv','bordure','fume'].includes(normalizedType)){
+      next = 'glassType:' + normalizedType;
+    }
+  }
+
+  invFilter = next;
+
+  // A previous search can hide the filtered products, so clear it when
+  // choosing a glass type from the inventory summary.
+  if(next.startsWith('glassType:')){
+    const search = document.getElementById('invSearch');
+    if(search) search.value = '';
+  }
+
+  document.querySelectorAll('#invChips .chip').forEach(c=>c.classList.remove('active'));
+  const chip = document.querySelector(`#invChips .chip[data-cat="${CSS.escape(next)}"]`);
+  if(chip) chip.classList.add('active');
+
   renderInventory();
+
+  // Keep the inventory list visible after selecting ESD / UV / SANS BORDURE.
+  const list = document.getElementById('inventoryList');
+  if(list) list.scrollIntoView({behavior:'smooth', block:'start'});
 }
 function setPosFilter(cat){
   posFilter = cat;
@@ -1947,7 +1971,7 @@ function renderInventory(){
         <div class="qty-pill">${qty} قطعة</div>
       </div>
       ${isGlass ? glassTypeEntries.map(([t, tq])=>{
-        const typeKey = Object.keys(glassTypeLabel).find(k => glassTypeLabel[k] === t) || '';
+        const typeKey = normalizeGlassType(Object.keys(glassTypeLabel).find(k => glassTypeLabel[k] === t) || t);
         return `
       <div class="row" style="padding-right:26px;cursor:pointer;" onclick="setInvFilter(${JSON.stringify(typeKey ? 'glassType:'+typeKey : '')})">
         <div class="row-main"><div class="row-sub">${escapeHtml(t)}</div></div>
@@ -1984,30 +2008,6 @@ function renderInventory(){
       <button class="chip ${invFilter==='low'?'active':''}" onclick="setInvFilter('low')">⚠ منخفض</button>
       ${cats.map(c=>`<button class="chip ${invFilter===c?'active':''}" onclick="setInvFilter('${escapeHtml(c)}')">${escapeHtml(c)}</button>`).join('')}
     `;
-  }
-
-  // عند اختيار فئة معيّنة (وليس "الكل")، نخفي بطاقات الملخص وتفصيل الفئات
-  // ونعرض فقط قائمة الأصناف الخاصة بها — حتى تخرج قائمة الصنف فقط كما طلب المستخدم.
-  const summarySection = document.getElementById('invSummarySection');
-  const activeBar = document.getElementById('invFilterActiveBar');
-  const activeLabel = document.getElementById('invFilterActiveLabel');
-  if(summarySection && activeBar){
-    if(invFilter === 'all'){
-      summarySection.style.display = '';
-      activeBar.style.display = 'none';
-    }else{
-      summarySection.style.display = 'none';
-      activeBar.style.display = '';
-      let label;
-      if(invFilter === 'low') label = '⚠ منخفض المخزون';
-      else if(String(invFilter).startsWith('glassType:')){
-        const typeKey = String(invFilter).slice('glassType:'.length);
-        label = typeKey === 'none' ? 'زجاج حماية — بدون نوع محدد' : ('زجاج حماية — ' + (glassTypeLabel[typeKey] || glassTypeLabel[normalizeGlassType(typeKey)] || typeKey));
-      }else{
-        label = invFilter;
-      }
-      if(activeLabel) activeLabel.textContent = label;
-    }
   }
 
   if(products.length === 0){
