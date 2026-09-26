@@ -1072,7 +1072,7 @@ let products = [];
 let invoices = [];
 let customers = [];
 let customerTx = [];
-let settings = { shopName: "Alpha Glass", currency: "ر.س", hideProfit: false, profitPin: "", shopPhone: "", appPassword: "", fingerprintCredentialId: "", friendPhone: "", autoLockMinutes: 0, limitedPassword: "", homeTiles: ['sell','inventory','invoices','customers','orders','debts'], thermalPaperWidth: "58mm" };
+let settings = { shopName: "Alpha Glass", currency: "ر.س", hideProfit: false, profitPin: "", shopPhone: "", appPassword: "", fingerprintCredentialId: "", friendPhone: "", autoLockMinutes: 0, limitedPassword: "", homeTiles: ['sell','inventory','invoices','customers','orders','debts'], thermalPaperWidth: "58mm", labelWidthMm: 20, labelHeightMm: 40, labelOffsetXmm: 0, labelOffsetYmm: 0, labelGapMm: 0 };
 let cart = {}; // productId -> qty
 let cartDisplayName = {}; // productId -> alternate name to sell/print under (from a compat group)
 let cartOverride = {}; // productId -> edited price for current checkout
@@ -1091,7 +1091,7 @@ let checkoutDiscountValue = '';
 let posCustomerId = null; // customer selected from Customers tab to build an order for
 let draftOrders = [];
 let expenses = [];
-const EXPENSE_CATEGORIES = ['وقود','طعام','نقل ومواصلات','صيانة','فواتير واتصالات','إيجار','أخرى'];
+const EXPENSE_CATEGORIES = []; // kept for backward compatibility; user-created categories are stored in settings.expenseCategories
 let orderDraftMode = false; // true while building a draft order (not an immediate sale)
 let editingDraftOrderId = null; // set while fulfilling an existing draft order
 const CART_STEP = 10;
@@ -1216,6 +1216,17 @@ async function loadAll(){
     const s = localStorage.getItem(STORAGE_PREFIX + 'settings');
     settings = s ? JSON.parse(s) : settings;
   }catch(e){ /* keep defaults */ }
+  if(!Array.isArray(settings.expenseCategories)) settings.expenseCategories = [];
+  // Preserve categories already used in old expense records, but never seed the old default list.
+  try{
+    const oldEx = localStorage.getItem(STORAGE_PREFIX + 'expenses');
+    const parsedEx = oldEx ? JSON.parse(oldEx) : [];
+    for(const e of (Array.isArray(parsedEx)?parsedEx:[])){
+      const c=String(e?.category||'').trim();
+      if(c && !settings.expenseCategories.includes(c)) settings.expenseCategories.push(c);
+    }
+    localStorage.setItem(STORAGE_PREFIX + 'settings', JSON.stringify(settings));
+  }catch(e){}
   try{
     const c = localStorage.getItem(STORAGE_PREFIX + 'customers');
     customers = c ? JSON.parse(c) : [];
@@ -1228,6 +1239,10 @@ async function loadAll(){
     const d = localStorage.getItem(STORAGE_PREFIX + 'draftOrders');
     draftOrders = d ? JSON.parse(d) : [];
   }catch(e){ draftOrders = []; }
+  // Compatibility is a core feature: make sure it is present even in older saved home layouts.
+  if(!Array.isArray(settings.homeTiles)) settings.homeTiles = [];
+  if(!settings.homeTiles.includes('compatGroups')) settings.homeTiles.push('compatGroups');
+  try{ localStorage.setItem(STORAGE_PREFIX + 'settings', JSON.stringify(settings)); }catch(e){}
   try{
     const ex = localStorage.getItem(STORAGE_PREFIX + 'expenses');
     expenses = ex ? JSON.parse(ex) : [];
@@ -1536,7 +1551,24 @@ function plainNum(n){
   const v = Math.round((n + Number.EPSILON) * 100) / 100;
   return v.toLocaleString('ar', {maximumFractionDigits:2});
 }
-function todayStr(){ return new Date().toISOString().slice(0,10); }
+function localDateKey(value){
+  const d = value instanceof Date ? value : new Date(value);
+  if(isNaN(d.getTime())) return '';
+  const y=d.getFullYear(), m=String(d.getMonth()+1).padStart(2,'0'), day=String(d.getDate()).padStart(2,'0');
+  return `${y}-${m}-${day}`;
+}
+function localTimeValue(value){
+  const d = value instanceof Date ? value : new Date(value);
+  if(isNaN(d.getTime())) return '00:00';
+  return `${String(d.getHours()).padStart(2,'0')}:${String(d.getMinutes()).padStart(2,'0')}`;
+}
+function localDateTimeToISO(dateKey,timeValue){
+  const [y,m,d]=String(dateKey||'').split('-').map(Number);
+  const [hh,mm]=String(timeValue||'00:00').split(':').map(Number);
+  if(!y||!m||!d) return new Date().toISOString();
+  return new Date(y,m-1,d,Number(hh)||0,Number(mm)||0,0,0).toISOString();
+}
+function todayStr(){ return localDateKey(new Date()); }
 
 /* ===== حماية أرقام الفواتير + حساب النقد الفعلي ===== */
 function repairInvoiceNumbers(){
@@ -1890,7 +1922,7 @@ function renderHeaderStrip(){
   // البطاقات تختفي فقط أثناء "تحضير طلبية"، وتبقى ظاهرة في باقي الصفحات.
   if(strip) strip.style.display = orderDraftMode ? 'none' : 'flex';
   const t = todayStr();
-  const todays = invoices.filter(i=>i.date.slice(0,10)===t);
+  const todays = invoices.filter(i=>localDateKey(i.date)===t);
   const sales = todays.reduce((a,i)=>a+i.total,0);
   const profit = todays.reduce((a,i)=>a+i.profit,0);
   const salesEl = document.getElementById('todaySales');
@@ -2676,14 +2708,14 @@ function shareAvailableWithCustomer(customerId){
     </div>
     <div class="row-sub" style="margin-bottom:16px;">وش تحب ترسل له؟</div>
     <div class="ledger">
+      <div class="row" style="cursor:pointer;" onclick="sendAvailableCatalog('${customerId}', 'all')">
+        <div class="row-main"><div class="row-name">📦 القائمة الكاملة — كل السلع</div><div class="row-sub">SANS BORDURE ثم ESD ثم UV ثم الإكسسوارات</div></div>
+      </div>
       <div class="row" style="cursor:pointer;" onclick="sendAvailableCatalog('${customerId}', 'glass')">
-        <div class="row-main"><div class="row-name">🛡 زجاج حماية فقط</div></div>
+        <div class="row-main"><div class="row-name">🛡 قائمة الزجاج فقط</div></div>
       </div>
       <div class="row" style="cursor:pointer;" onclick="sendAvailableCatalog('${customerId}', 'other')">
-        <div class="row-main"><div class="row-name">🎧 إكسسوارات فقط</div></div>
-      </div>
-      <div class="row" style="cursor:pointer;" onclick="sendAvailableCatalog('${customerId}', 'all')">
-        <div class="row-main"><div class="row-name">📦 كل شيء</div></div>
+        <div class="row-main"><div class="row-name">🎧 الإكسسوارات فقط</div></div>
       </div>
     </div>
   `;
@@ -3344,7 +3376,7 @@ function clearInvoicesDateFilter(){
 function invoiceDayLabel(dateKey){
   const today = todayStr();
   const y = new Date(); y.setDate(y.getDate()-1);
-  const yesterday = y.toISOString().slice(0,10);
+  const yesterday = localDateKey(y);
   if(dateKey === today) return 'اليوم';
   if(dateKey === yesterday) return 'أمس';
   return new Date(dateKey).toLocaleDateString('ar', {weekday:'long', year:'numeric', month:'long', day:'numeric'});
@@ -3356,7 +3388,7 @@ function renderInvoices(){
     list.innerHTML = `<div class="empty"><span class="big">📜</span>لا توجد فواتير بعد<div class="hint">ستظهر هنا فور إتمام أول عملية بيع</div></div>`;
     return;
   }
-  const filteredInvoices = invoicesDateFilter ? invoices.filter(inv=>String(inv.date).slice(0,10)===invoicesDateFilter) : invoices;
+  const filteredInvoices = invoicesDateFilter ? invoices.filter(inv=>localDateKey(inv.date)===invoicesDateFilter) : invoices;
   if(filteredInvoices.length === 0){
     list.innerHTML = `<div class="empty"><span class="big">📭</span>لا توجد فواتير في هذا اليوم</div>`;
     return;
@@ -3366,7 +3398,7 @@ function renderInvoices(){
   const groups = [];
   let curKey = null, curGroup = null;
   filteredInvoices.forEach(inv=>{
-    const dateKey = String(inv.date).slice(0,10);
+    const dateKey = localDateKey(inv.date);
     if(dateKey !== curKey){
       curKey = dateKey;
       curGroup = { dateKey, items: [] };
@@ -3694,7 +3726,7 @@ function shareInvoiceWhatsApp(inv){
 }
 
 /* ===== طباعة على طابعة حرارية (نفس الطابعة للفاتورة والملصقات، بتغيير عرض الورق حسب اللف المستخدم) ===== */
-function applyThermalPrintStyle(){
+function applyThermalPrintStyle(mode='receipt'){
   const width = (settings.thermalPaperWidth === '80mm') ? '80mm' : '58mm';
   let styleEl = document.getElementById('thermalPrintStyle');
   if(!styleEl){
@@ -3702,9 +3734,15 @@ function applyThermalPrintStyle(){
     styleEl.id = 'thermalPrintStyle';
     document.head.appendChild(styleEl);
   }
+  const lw = Math.max(10, Number(settings.labelWidthMm || 20));
+  const lh = Math.max(10, Number(settings.labelHeightMm || 40));
+  const ox = Number(settings.labelOffsetXmm || 0);
+  const oy = Number(settings.labelOffsetYmm || 0);
+  const pageSize = mode === 'label' ? `${lw}mm ${lh}mm` : width + ' auto';
   styleEl.textContent = `
+    :root{--label-w:${lw}mm;--label-h:${lh}mm;--label-x:${ox}mm;--label-y:${oy}mm;}
     @media print{
-      @page{ size: ${width} auto; margin: 0mm; }
+      @page{ size:${pageSize}; margin:0 !important; }
       html, body{ width:${width}; }
       #invoiceView{ width:${width} !important; }
       .receipt{
@@ -3715,20 +3753,44 @@ function applyThermalPrintStyle(){
         border:none !important;
         box-sizing:border-box;
       }
-      #labelPrintView{ width:${width} !important; padding:0 !important; }
+      #labelPrintView{ width:100% !important; padding:0 !important; margin:0 !important; }
       .label-grid{
         display:block !important;
-        width:${width} !important;
+        width:100% !important;
+        margin:0 !important;
+        padding:0 !important;
       }
+      .label-page{
+        width:var(--label-w,20mm) !important;
+        height:var(--label-h,40mm) !important;
+        box-sizing:border-box !important;
+        margin:0 !important;
+        padding:0 !important;
+        page-break-after:always !important;
+        break-after:page !important;
+        overflow:hidden !important;
+        position:relative !important;
+      }
+      .label-page:last-child{ page-break-after:auto !important; break-after:auto !important; }
       .label-box{
         width:100% !important;
-        box-sizing:border-box;
+        height:100% !important;
+        box-sizing:border-box !important;
         border:none !important;
-        border-bottom:1px dashed #999 !important;
         border-radius:0 !important;
-        padding:12px 4px !important;
-        font-size:17px !important;
-        page-break-inside:avoid;
+        padding:0 !important;
+        margin:0 !important;
+        display:flex !important;
+        align-items:center !important;
+        justify-content:center !important;
+        text-align:center !important;
+        font-family:'Cairo',sans-serif !important;
+        font-weight:800 !important;
+        font-size:var(--label-font,14px) !important;
+        line-height:1.15 !important;
+        word-break:break-word !important;
+        overflow:hidden !important;
+        transform:translate(var(--label-x,0mm),var(--label-y,0mm)) !important;
       }
     }
   `;
@@ -4393,8 +4455,8 @@ function renderProfits(){
   }
   const dayNames = ['أحد','اثنين','ثلاثاء','أربعاء','خميس','جمعة','سبت'];
   const dayProfits = days.map(d=>{
-    const key = d.toISOString().slice(0,10);
-    const sum = invoices.filter(inv=>inv.date.slice(0,10)===key).reduce((a,i)=>a+i.profit,0);
+    const key = localDateKey(d);
+    const sum = invoices.filter(inv=>localDateKey(inv.date)===key).reduce((a,i)=>a+i.profit,0);
     return { label: dayNames[d.getDay()], value: sum };
   });
   const max = Math.max(1, ...dayProfits.map(d=>d.value));
@@ -5896,131 +5958,68 @@ function openProductCatalog(){
 function buildCatalogText(type){
   let items, header;
   if(type==='traders'){
-    items = products.filter(p=>p.qty>0);
+    items = products.filter(p=>Number(p.qty)>0);
     header = '📋 قائمة الأسعار:';
   }else{
     const isGlassType = type==='glass';
-    items = products.filter(p=>(categoryLabel(p)==='زجاج حماية')===isGlassType && p.qty>0);
+    items = products.filter(p=>(categoryLabel(p)==='زجاج حماية')===isGlassType && Number(p.qty)>0);
     header = isGlassType ? '📦 المتوفر حاليًا من زجاج الحماية:' : '🎧 المتوفر حاليًا من الإكسسوارات:';
   }
   if(items.length === 0) return null;
 
-  const lines = [];
-  lines.push(`*${settings.shopName || 'متجري'}*`);
-  lines.push(header);
-  lines.push('');
+  const lines = [`*${settings.shopName || 'Alpha Glass'}*`, header, ''];
 
   if(type==='glass'){
-    // ESD: مصنف حسب الشركة. UV: قائمة واحدة في الأسفل بدون تصنيف الشركات.
-    const sansBordureNames = [];
-    const esdBrandGroups = {};
-    const uvNames = [];
-    const seenSansBordure = new Set();
-    const seenEsd = new Set();
-    const seenUv = new Set();
-
-    const getGlassGroup = p => {
-      let grp = p.compatGroupId ? compatGroups.find(g=>g.id===p.compatGroupId) : null;
-      if(!grp) grp = compatGroups.find(g=>g.models.some(m => matchesModel(p.name, m)));
-      return grp;
-    };
-
-    items.forEach(p=>{
-      const grp = getGlassGroup(p);
-      const namesToList = grp ? grp.models : [p.name];
-      const glassType = String(p.glassType || '').toLowerCase();
-
-      namesToList.forEach(name=>{
-        const cleanName = String(name || '').trim();
-        if(!cleanName) return;
-        const key = cleanName.toLowerCase();
-
-        if(glassType === 'bordure'){
-          if(seenSansBordure.has(key)) return;
-          seenSansBordure.add(key);
-          sansBordureNames.push({name: cleanName, isNew: !!p.isNew});
-          return;
-        }
-
-        if(glassType === 'uv'){
-          if(seenUv.has(key)) return;
-          seenUv.add(key);
-          uvNames.push({name: cleanName, isNew: !!p.isNew});
-          return;
-        }
-
-        // ESD أو النوع غير المحدد: يبقى ضمن تصنيف الشركة كما في القائمة التجارية.
-        if(seenEsd.has(key)) return;
-        seenEsd.add(key);
-        const brandKey = String(p.brand || 'أخرى').trim() || 'أخرى';
-        if(!esdBrandGroups[brandKey]) esdBrandGroups[brandKey] = [];
-        esdBrandGroups[brandKey].push({name: cleanName, isNew: !!p.isNew});
-      });
-    });
-
-    if(sansBordureNames.length){
-      lines.push('📱 *SANS BORDURE*');
-      lines.push('');
-      sansBordureNames.sort((a,b)=>a.name.localeCompare(b.name, undefined, {numeric:true, sensitivity:'base'}));
-      lines.push(sansBordureNames.map(item => item.isNew ? `🆕 *${item.name}*` : item.name).join(' / '));
-      lines.push('');
+    const groups={bordure:[],esd:{},uv:[]};
+    const seen={bordure:new Set(),esd:new Set(),uv:new Set()};
+    for(const p of items){
+      const key=normalizeGlassType(p.glassType);
+      const name=String(p.name||'').trim();
+      if(!name) continue;
+      const item={name,price:Number(p.sellPrice)||0};
+      if(key==='bordure'){
+        const k=name.toLowerCase(); if(!seen.bordure.has(k)){seen.bordure.add(k);groups.bordure.push(item);} continue;
+      }
+      if(key==='uv'){
+        const k=name.toLowerCase(); if(!seen.uv.has(k)){seen.uv.add(k);groups.uv.push(item);} continue;
+      }
+      // ESD is the normal glass type; unknown legacy glass types are shown here rather than silently lost.
+      const brand=String(p.brand||'أخرى').trim()||'أخرى';
+      if(!groups.esd[brand]) groups.esd[brand]=[];
+      const k=name.toLowerCase(); if(!seen.esd.has(k)){
+        seen.esd.add(k); groups.esd[brand].push(item);
+      }
     }
-
-    lines.push('🔵 *ESD*');
-    lines.push('');
-
-    const brandIcon = brand => {
-      const b = String(brand || '').toLowerCase();
-      if(b.includes('apple') || b.includes('ايفون') || b.includes('أبل')) return '🍎';
-      if(b.includes('samsung') || b.includes('سامسون')) return '📱';
-      if(b.includes('honor') || b.includes('اونر')) return '⭐';
-      if(b.includes('xiaomi') || b.includes('redmi') || b.includes('شاومي')) return '🔴';
-      if(b.includes('oppo')) return '🟢';
-      if(b.includes('realme')) return '🟡';
-      if(b.includes('infinix')) return '📱';
-      if(b.includes('tecno')) return '⚡';
-      return '📱';
-    };
-
-    const brandNames = Object.keys(esdBrandGroups).sort((a,b)=>{
-      if(a==='أخرى') return 1;
-      if(b==='أخرى') return -1;
-      return a.localeCompare(b);
-    });
-
-    brandNames.forEach(brand=>{
-      const models = esdBrandGroups[brand]
-        .sort((a,b)=>a.name.localeCompare(b.name, undefined, {numeric:true, sensitivity:'base'}));
-      lines.push(`${brandIcon(brand)} *━━ ${brand} ━━*`);
-      lines.push(models.map(item => item.isNew ? `🆕 *${item.name}*` : item.name).join(' / '));
-      lines.push('');
-    });
-
-    if(uvNames.length){
-      lines.push('🟣 *UV*');
-      lines.push('');
-      uvNames.sort((a,b)=>a.name.localeCompare(b.name, undefined, {numeric:true, sensitivity:'base'}));
-      lines.push(uvNames.map(item => item.isNew ? `🆕 *${item.name}*` : item.name).join(' / '));
+    const lineItem=x=>`${x.name} — ${plainNum(x.price)} ${settings.currency}`;
+    if(groups.bordure.length){
+      lines.push('📱 *SANS BORDURE*','');
+      groups.bordure.sort((a,b)=>a.name.localeCompare(b.name,undefined,{numeric:true,sensitivity:'base'}));
+      lines.push(groups.bordure.map(lineItem).join(' / '),'');
+    }
+    lines.push('🔵 *ESD*','');
+    const brandNames=Object.keys(groups.esd).sort((a,b)=>a.localeCompare(b,undefined,{numeric:true,sensitivity:'base'}));
+    for(const brand of brandNames){
+      const arr=groups.esd[brand].sort((a,b)=>a.name.localeCompare(b.name,undefined,{numeric:true,sensitivity:'base'}));
+      lines.push(`📱 *${brand}*`);
+      lines.push(arr.map(lineItem).join(' / '),'');
+    }
+    if(groups.uv.length){
+      lines.push('🟣 *UV*','');
+      groups.uv.sort((a,b)=>a.name.localeCompare(b.name,undefined,{numeric:true,sensitivity:'base'}));
+      lines.push(groups.uv.map(lineItem).join(' / '));
     }
   }else{
-    items.forEach(p=>{
-      if(type==='traders'){
-        lines.push(`${p.name} — ${plainNum(p.sellPrice)} ${settings.currency}`);
-      }else{
-        lines.push(p.isNew ? `🆕 *${p.name}* (جديد!)` : `✅ ${p.name}`);
-      }
-    });
+    items.sort((a,b)=>String(a.name||'').localeCompare(String(b.name||''),undefined,{numeric:true,sensitivity:'base'}));
+    for(const p of items) lines.push(`${p.name} — ${plainNum(p.sellPrice)} ${settings.currency}`);
   }
-
-  lines.push('');
-  lines.push(type==='traders' ? '💰 السعر يتغير حسب الكمية 📩' : '💰 السعر يتغير حسب الكمية\n📦 للطلب بالجملة: أرسل الكمية المطلوبة');
+  lines.push('', '💰 السعر يتغير حسب الكمية', '📦 للطلب بالجملة: أرسل الكمية المطلوبة');
   return lines.join('\n');
 }
 
 function shareCatalogWhatsApp(type){
-  const text = buildCatalogText(type);
-  if(!text){ showToast('لا توجد أصناف لمشاركتها'); return; }
-  window.open(`https://wa.me/?text=${encodeURIComponent(text)}`, '_blank');
+  const text=buildCatalogText(type);
+  if(!text){showToast('لا توجد أصناف متوفرة لمشاركتها');return;}
+  window.open(`https://wa.me/?text=${encodeURIComponent(text)}`,'_blank');
 }
 
 async function copyTradersListText(){
@@ -6126,7 +6125,8 @@ function printProductLabels(productId, labelName){
   if(qty > 200) qty = 200;
 
   const grid = document.getElementById('labelGridContent');
-  grid.innerHTML = Array.from({length: qty}).map(()=>`<div class="label-box">${escapeHtml(name)}</div>`).join('');
+  grid.innerHTML = Array.from({length: qty}).map(()=>`<div class="label-page"><div class="label-box">${escapeHtml(name)}</div></div>`).join('');
+  applyThermalPrintStyle('label');
   window.print();
 }
 
@@ -6143,7 +6143,8 @@ function printCartLabels(){
     for(let i=0;i<labelCount;i++) labels.push(name);
   });
   const grid = document.getElementById('labelGridContent');
-  grid.innerHTML = labels.map(n=>`<div class="label-box">${escapeHtml(n)}</div>`).join('');
+  grid.innerHTML = labels.map(n=>`<div class="label-page"><div class="label-box">${escapeHtml(n)}</div></div>`).join('');
+  applyThermalPrintStyle('label');
   window.print();
 }
 
@@ -6635,17 +6636,17 @@ function openMonthComparison(period, selectedDate){
 function openDailyClosing(){
   const sheet = document.getElementById('sheetContent');
   const today = todayStr();
-  const todaysInvoices = invoices.filter(i=>i.date.slice(0,10)===today);
+  const todaysInvoices = invoices.filter(i=>localDateKey(i.date)===today);
   const salesTotal = todaysInvoices.reduce((a,i)=>a+i.total,0);
   const profitTotal = todaysInvoices.reduce((a,i)=>a+i.profit,0);
   const cashFromInvoicesToday = todaysInvoices.reduce((a,i)=> a + (i.paymentMethod==='cash' ? i.total : (i.paidNow||0)), 0);
   // تحصيل ديون قديمة اليوم (سداد من عميل على فاتورة من يوم سابق) هو نقد دخل جيبك اليوم فعليًا،
   // لذلك يُحسب ضمن "نقد محصّل" حتى لو الفاتورة الأصلية ليست من اليوم.
-  const debtPaymentsToday = customerTx.filter(t=> isRealCashDebtPayment(t) && String(t.date).slice(0,10)===today)
+  const debtPaymentsToday = customerTx.filter(t=> isRealCashDebtPayment(t) && localDateKey(t.date)===today)
     .reduce((a,t)=>a+(Number(t.amount)||0),0);
   const cashCollected = cashFromInvoicesToday + debtPaymentsToday;
   const newDebtToday = todaysInvoices.reduce((a,i)=> a + (i.remaining||0), 0);
-  const expensesToday = expenses.filter(e=>e.date.slice(0,10)===today).reduce((a,e)=>a+e.amount,0);
+  const expensesToday = expenses.filter(e=>localDateKey(e.date)===today).reduce((a,e)=>a+e.amount,0);
   const netCash = cashCollected - expensesToday;
 
   const itemStats = {};
@@ -6718,123 +6719,113 @@ function openDailyClosing(){
 }
 
 let expensesDateFilter = null;
-function setExpensesDateFilter(v){ expensesDateFilter = v || null; openExpenses(); }
-function clearExpensesDateFilter(){ expensesDateFilter = null; openExpenses(); }
+function getExpenseCategories(){
+  if(!Array.isArray(settings.expenseCategories)) settings.expenseCategories=[];
+  return settings.expenseCategories.filter(x=>String(x||'').trim());
+}
+async function addExpenseCategory(){
+  const name=window.prompt('اكتب اسم تصنيف المصروف الجديد:','');
+  const c=String(name||'').trim();
+  if(!c) return;
+  const cats=getExpenseCategories();
+  if(cats.includes(c)){showToast('هذا التصنيف موجود بالفعل');return;}
+  cats.push(c);
+  settings.expenseCategories=cats;
+  await saveSettings();
+  openExpenses();
+  showToast('تمت إضافة التصنيف');
+}
+async function deleteExpenseCategory(name){
+  const cats=getExpenseCategories().filter(c=>c!==name);
+  settings.expenseCategories=cats;
+  await saveSettings();
+  openExpenses();
+  showToast('تم حذف التصنيف من قائمة الاختيار');
+}
+function setExpensesDateFilter(v){ expensesDateFilter=v||null; openExpenses(); }
+function clearExpensesDateFilter(){ expensesDateFilter=null; openExpenses(); }
 
 function openExpenses(){
-  const sheet = document.getElementById('sheetContent');
-  const today = todayStr();
-  const todayTotal = expenses.filter(e=>e.date.slice(0,10)===today).reduce((a,e)=>a+e.amount,0);
-  const allTotal = expenses.reduce((a,e)=>a+e.amount,0);
-  const sorted = [...expenses].sort((a,b)=> new Date(b.date)-new Date(a.date));
-  const filtered = expensesDateFilter ? sorted.filter(e=>String(e.date).slice(0,10)===expensesDateFilter) : sorted;
-
-  // إحصائيات المصاريف يوميًا: تجميع كل المصاريف حسب اليوم مع مجموع كل يوم، لعرض اتجاه الصرف عبر الأيام.
-  const dayGroups = {};
-  const dayOrder = [];
-  filtered.forEach(e=>{
-    const key = String(e.date).slice(0,10);
-    if(!dayGroups[key]){ dayGroups[key] = []; dayOrder.push(key); }
-    dayGroups[key].push(e);
-  });
-
-  sheet.innerHTML = `
-    <div class="sheet-head">
-      <h3>المصاريف اليومية</h3>
-      <button class="icon-btn" onclick="closeOverlay()">✕</button>
-    </div>
+  const sheet=document.getElementById('sheetContent');
+  const today=todayStr();
+  const todayTotal=expenses.filter(e=>localDateKey(e.date)===today).reduce((a,e)=>a+Number(e.amount||0),0);
+  const allTotal=expenses.reduce((a,e)=>a+Number(e.amount||0),0);
+  const sorted=[...expenses].sort((a,b)=>new Date(b.date)-new Date(a.date));
+  const filtered=expensesDateFilter ? sorted.filter(e=>localDateKey(e.date)===expensesDateFilter) : sorted;
+  const dayGroups={}, dayOrder=[];
+  filtered.forEach(e=>{const key=localDateKey(e.date); if(!dayGroups[key]){dayGroups[key]=[];dayOrder.push(key);} dayGroups[key].push(e);});
+  const cats=getExpenseCategories();
+  sheet.innerHTML=`
+    <div class="sheet-head"><h3>المصاريف اليومية</h3><button class="icon-btn" onclick="closeOverlay()">✕</button></div>
     <div class="stat-grid">
-      <div class="stat-card">
-        <div class="v mono" style="color:var(--alert);">${plainNum(todayTotal)}</div>
-        <div class="l">مصاريف اليوم</div>
-      </div>
-      <div class="stat-card">
-        <div class="v mono" style="color:var(--alert);">${plainNum(allTotal)}</div>
-        <div class="l">إجمالي المصاريف</div>
-      </div>
+      <div class="stat-card"><div class="v mono" style="color:var(--alert);">${plainNum(todayTotal)}</div><div class="l">مصاريف اليوم</div></div>
+      <div class="stat-card"><div class="v mono" style="color:var(--alert);">${plainNum(allTotal)}</div><div class="l">إجمالي المصاريف</div></div>
     </div>
-    <div class="sheet-actions" style="margin-bottom:16px;">
-      <button class="btn btn-brass btn-block" onclick="openExpenseForm()">+ إضافة مصروف</button>
-    </div>
+    <div class="sheet-actions" style="margin-bottom:12px;"><button class="btn btn-brass btn-block" onclick="openExpenseForm()">+ إضافة مصروف</button></div>
     <div class="section-title"><span>إحصائيات المصاريف حسب اليوم</span></div>
-    <div class="stats-date-picker" style="margin-bottom:14px;">
-      <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;">
-        <input type="date" id="expensesSelectedDate" value="${expensesDateFilter ? statsEscape(expensesDateFilter) : ''}" onchange="setExpensesDateFilter(this.value)" style="flex:1;min-width:180px;">
-        <button class="chip" onclick="clearExpensesDateFilter()">كل الأيام</button>
-      </div>
+    <div class="stats-date-picker" style="margin-bottom:14px;"><div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;">
+      <input type="date" id="expensesSelectedDate" value="${expensesDateFilter?statsEscape(expensesDateFilter):''}" onchange="setExpensesDateFilter(this.value)" style="flex:1;min-width:180px;">
+      <button class="chip" onclick="clearExpensesDateFilter()">كل الأيام</button>
+    </div></div>
+    <div class="sheet-actions" style="margin-bottom:14px;">
+      <button class="btn btn-outline btn-block" onclick="addExpenseCategory()">＋ إضافة تصنيف مصروف</button>
     </div>
-    ${dayOrder.length === 0 ? `<div class="empty" style="padding:24px;">${expensesDateFilter ? 'لا توجد مصاريف في هذا اليوم' : 'لا توجد مصاريف مسجلة بعد'}</div>` : dayOrder.map(dayKey=>{
-      const dayItems = dayGroups[dayKey];
-      const dayTotal = dayItems.reduce((a,e)=>a+e.amount,0);
-      return `
-      <div class="section-title" style="margin-top:10px;"><span>${invoiceDayLabel(dayKey)}</span><span class="mono" style="color:var(--alert);font-weight:700;">${plainNum(dayTotal)}</span></div>
-      <div class="ledger" style="margin-bottom:6px;">
-        ${dayItems.map(e=>{
-          const d = new Date(e.date);
-          const timeStr = d.toLocaleTimeString('ar', {hour:'2-digit', minute:'2-digit'});
-          return `
-          <div class="row">
-            <div class="row-main">
-              <div class="row-name">${escapeHtml(e.category)}${e.note ? ' — ' + escapeHtml(e.note) : ''}</div>
-              <div class="row-sub">${timeStr}</div>
-            </div>
-            <div class="mono" style="font-weight:700;color:var(--alert);">${plainNum(e.amount)}</div>
-            <button class="icon-btn" onclick="deleteExpense('${e.id}')">🗑</button>
-          </div>`;
-        }).join('')}
-      </div>
-      `;
+    ${cats.length?`<div class="row-sub" style="margin-bottom:8px;">التصنيفات الحالية: ${cats.map(c=>`<span class="cat-badge other" style="margin:2px;display:inline-flex;align-items:center;gap:4px;">${escapeHtml(c)} <button class="icon-btn" style="width:20px;height:20px;font-size:10px;" onclick="deleteExpenseCategory('${escapeHtml(c).replace(/'/g,"\\'")}')">×</button></span>`).join('')}</div>`:'<div class="empty" style="padding:12px;margin-bottom:10px;">لم تضف أي تصنيف بعد. أضف تصنيفًا عند تسجيل أول مصروف.</div>'}
+    ${dayOrder.length===0?`<div class="empty" style="padding:24px;">${expensesDateFilter?'لا توجد مصاريف في هذا اليوم':'لا توجد مصاريف مسجلة بعد'}</div>`:dayOrder.map(dayKey=>{
+      const dayItems=dayGroups[dayKey], dayTotal=dayItems.reduce((a,e)=>a+Number(e.amount||0),0);
+      return `<div class="section-title" style="margin-top:10px;"><span>${invoiceDayLabel(dayKey)}</span><span class="mono" style="color:var(--alert);font-weight:700;">${plainNum(dayTotal)}</span></div>
+      <div class="ledger" style="margin-bottom:6px;">${dayItems.map(e=>{
+        const d=new Date(e.date), timeStr=d.toLocaleTimeString('ar',{hour:'2-digit',minute:'2-digit'});
+        return `<div class="row"><div class="row-main"><div class="row-name">${escapeHtml(e.category||'بدون تصنيف')}${e.note?' — '+escapeHtml(e.note):''}</div><div class="row-sub">${timeStr}</div></div><div class="mono" style="font-weight:700;color:var(--alert);">${plainNum(e.amount)}</div><button class="icon-btn" onclick="openExpenseForm('${e.id}')">✎</button><button class="icon-btn" onclick="deleteExpense('${e.id}')">🗑</button></div>`;
+      }).join('')}</div>`;
     }).join('')}
   `;
   openOverlay();
 }
 
-function openExpenseForm(){
-  const sheet = document.getElementById('sheetContent');
-  sheet.innerHTML = `
-    <div class="sheet-head">
-      <h3>إضافة مصروف</h3>
-      <button class="icon-btn" onclick="openExpenses()">✕</button>
-    </div>
-    <div class="field">
-      <label>المبلغ</label>
-      <input type="number" inputmode="decimal" id="ex-amount" placeholder="0.00">
-    </div>
-    <div class="field">
-      <label>الصنف</label>
-      <select id="ex-category">
-        ${EXPENSE_CATEGORIES.map(c=>`<option value="${c}">${c}</option>`).join('')}
-      </select>
-    </div>
-    <div class="field">
-      <label>ملاحظة (اختياري)</label>
-      <input type="text" id="ex-note" placeholder="مثال: بنزين السيارة">
-    </div>
-    <div class="sheet-actions">
-      <button class="btn btn-outline" onclick="openExpenses()">تراجع</button>
-      <button class="btn btn-brass" onclick="saveExpenseForm()">حفظ</button>
-    </div>
+function openExpenseForm(id=null){
+  const existing=id?expenses.find(e=>e.id===id):null;
+  const now=new Date();
+  const dateVal=existing?localDateKey(existing.date):todayStr();
+  const timeVal=existing?localTimeValue(existing.date):localTimeValue(now);
+  const cats=getExpenseCategories();
+  const sheet=document.getElementById('sheetContent');
+  sheet.innerHTML=`
+    <div class="sheet-head"><h3>${existing?'تعديل مصروف':'إضافة مصروف'}</h3><button class="icon-btn" onclick="openExpenses()">✕</button></div>
+    <div class="field"><label>المبلغ</label><input type="number" inputmode="decimal" id="ex-amount" value="${existing?Number(existing.amount):''}" placeholder="0.00"></div>
+    <div class="field"><label>التاريخ</label><input type="date" id="ex-date" value="${dateVal}"></div>
+    <div class="field"><label>الوقت</label><input type="time" id="ex-time" value="${timeVal}"></div>
+    <div class="field"><label>التصنيف</label><select id="ex-category"><option value="">بدون تصنيف</option>${cats.map(c=>`<option value="${escapeHtml(c)}" ${existing&&existing.category===c?'selected':''}>${escapeHtml(c)}</option>`).join('')}</select></div>
+    <button class="btn btn-outline btn-block" onclick="addExpenseCategory()">＋ إضافة تصنيف جديد</button>
+    <div class="field"><label>ملاحظة (اختياري)</label><input type="text" id="ex-note" value="${existing?escapeHtml(existing.note||''):''}" placeholder="مثال: مصروف بنزين"></div>
+    <div class="sheet-actions"><button class="btn btn-outline" onclick="openExpenses()">تراجع</button><button class="btn btn-brass" onclick="saveExpenseForm('${existing?existing.id:''}')">حفظ</button></div>
   `;
 }
 
-async function saveExpenseForm(){
-  const amount = parseFloat(document.getElementById('ex-amount').value);
-  const category = document.getElementById('ex-category').value;
-  const note = document.getElementById('ex-note').value.trim();
-  if(isNaN(amount) || amount <= 0){ showToast('أدخل مبلغًا صحيحًا'); return; }
-
-  expenses.unshift({ id: uid(), amount, category, note, date: new Date().toISOString() });
-  await saveExpenses();
-  renderProfits();
-  openExpenses();
-  showToast('تم تسجيل المصروف');
+async function saveExpenseForm(id=''){
+  const amount=parseFloat(document.getElementById('ex-amount')?.value);
+  const category=(document.getElementById('ex-category')?.value||'').trim();
+  const note=(document.getElementById('ex-note')?.value||'').trim();
+  const dateKey=document.getElementById('ex-date')?.value||todayStr();
+  const timeKey=document.getElementById('ex-time')?.value||localTimeValue(new Date());
+  if(!isFinite(amount)||amount<=0){showToast('أدخل مبلغًا صحيحًا');return;}
+  if(category){const cats=getExpenseCategories();if(!cats.includes(category)){cats.push(category);settings.expenseCategories=cats;}}
+  const date=localDateTimeToISO(dateKey,timeKey);
+  if(id){
+    const e=expenses.find(x=>x.id===id); if(!e){showToast('المصروف غير موجود');return;}
+    e.amount=amount;e.category=category;e.note=note;e.date=date;
+  }else{
+    expenses.unshift({id:uid(),amount,category,note,date});
+  }
+  await Promise.all([saveExpenses(),saveSettings()]);
+  renderProfits(); openExpenses();
+  showToast(id?'تم تعديل المصروف':'تم تسجيل المصروف');
 }
 
 async function deleteExpense(id){
-  expenses = expenses.filter(e=>e.id!==id);
-  await saveExpenses();
-  renderProfits();
-  openExpenses();
+  expenses=expenses.filter(e=>e.id!==id);
+  await saveExpenses(); renderProfits(); openExpenses();
+  showToast('تم حذف المصروف');
 }
 
 function renderOrdersScreen(){
@@ -6932,7 +6923,8 @@ function printOrderLabels(orderId){
   });
   if(labels.length === 0){ showToast('لا توجد أصناف بديلة تحتاج ملصقات'); return; }
   const grid = document.getElementById('labelGridContent');
-  grid.innerHTML = labels.map(n=>`<div class="label-box">${escapeHtml(n)}</div>`).join('');
+  grid.innerHTML = labels.map(n=>`<div class="label-page"><div class="label-box">${escapeHtml(n)}</div></div>`).join('');
+  applyThermalPrintStyle('label');
   window.print();
 }
 
@@ -7241,7 +7233,13 @@ function openSettings(){
           <option value="80mm" ${settings.thermalPaperWidth==='80mm' ? 'selected':''}>80mm</option>
         </select>
       </div>
-      <div class="row-sub" style="margin-top:8px;">إذا كانت الفاتورة أو الملصقات تطبع بعرض غلط أو مقطوعة، جرّب تبدّل هذا الخيار. لطباعة الملصقات، اختر نفس الخيار — الطباعة تتم على عرض الورق المركّب حاليًا في الطابعة.</div>
+      <div class="row-sub" style="margin-top:8px;">إذا كانت الفاتورة أو الملصقات تطبع بعرض غلط أو مقطوعة، جرّب تبدّل هذا الخيار.</div>
+      <div class="settings-subtitle">📏 إعدادات ملصق المنتج</div>
+      <div class="field"><label>عرض الملصق (mm)</label><input type="number" step="1" min="10" id="s-label-width" value="${Number(settings.labelWidthMm||20)}"></div>
+      <div class="field"><label>طول الملصق (mm)</label><input type="number" step="1" min="10" id="s-label-height" value="${Number(settings.labelHeightMm||40)}"></div>
+      <div class="field"><label>تحريك أفقي (mm) <span>• موجب = يمين</span></label><input type="number" step="0.5" id="s-label-offset-x" value="${Number(settings.labelOffsetXmm||0)}"></div>
+      <div class="field"><label>تحريك عمودي (mm) <span>• موجب = أسفل</span></label><input type="number" step="0.5" id="s-label-offset-y" value="${Number(settings.labelOffsetYmm||0)}"></div>
+      <div class="row-sub" style="margin-top:8px;">كل ملصق أصبح صفحة مستقلة بنفس المقاس، حتى لا يتراكم الانحراف من ملصق إلى الذي بعده.</div>
     </div>
 
     <div class="settings-group-title"><span class="settings-group-icon">🔐</span><div><b>الخصوصية والحماية</b><small>حماية الأرباح وتأمين فتح التطبيق</small></div></div>
@@ -7366,7 +7364,15 @@ async function saveSettingsForm(){
   settings.hideProfit = newHide;
   const thermalEl = document.getElementById('s-thermal-width');
   if(thermalEl) settings.thermalPaperWidth = thermalEl.value === '80mm' ? '80mm' : '58mm';
-  applyThermalPrintStyle();
+  const lwEl = document.getElementById('s-label-width');
+  const lhEl = document.getElementById('s-label-height');
+  const loxEl = document.getElementById('s-label-offset-x');
+  const loyEl = document.getElementById('s-label-offset-y');
+  if(lwEl) settings.labelWidthMm = Math.max(10, Number(lwEl.value)||20);
+  if(lhEl) settings.labelHeightMm = Math.max(10, Number(lhEl.value)||40);
+  if(loxEl) settings.labelOffsetXmm = Number(loxEl.value)||0;
+  if(loyEl) settings.labelOffsetYmm = Number(loyEl.value)||0;
+  applyThermalPrintStyle('receipt');
 
   const pwVal = document.getElementById('s-app-password').value;
   if(pwVal === '__CLEAR__'){
