@@ -6061,6 +6061,11 @@ function pt210RasterCommand(raster,widthBytes,height){
 
 function pt210EscPosInit(){ return new Uint8Array([0x1b,0x40]); }
 function pt210Feed(lines=3){ return new Uint8Array([0x1b,0x64,Math.max(0,Math.min(8,lines))]); }
+// ESC/POS: feed paper by an exact number of dots. At 203dpi, 8 dots ≈ 1mm.
+function pt210FeedDots(dots=0){
+  const n=Math.max(0,Math.min(255,Math.round(Number(dots)||0)));
+  return new Uint8Array([0x1b,0x4a,n]);
+}
 
 async function printPT210Text(text, copies=1, opts={}){
   if(!pt210Supported()){
@@ -6080,8 +6085,15 @@ async function printPT210Text(text, copies=1, opts={}){
       await pt210Delay(30);
       await pt210Write(pt210RasterCommand(raster,widthBytes,height));
       await pt210Delay(120);
-      // في وضع الملصقات لا نضيف تغذية إضافية؛ ارتفاع الرستر نفسه = 20 مم.
-      if(!opts.label){
+      if(opts.label){
+        // الملصق عندنا 20mm ارتفاع ≈ 160 dots. بعد طباعته نضيف فقط
+        // مسافة الفراغ بين الملصقات، بدل تغذية ورقة طويلة.
+        const gapDots=Math.max(0,Math.min(255,Number.isFinite(Number(opts.labelGapDots)) ? Number(opts.labelGapDots) : 16));
+        if(gapDots>0){
+          await pt210Write(pt210FeedDots(gapDots));
+          await pt210Delay(80);
+        }
+      }else{
         await pt210Write(pt210Feed(3));
         await pt210Delay(120);
       }
@@ -6130,6 +6142,16 @@ async function printPT210Invoice(inv){
   return await printPT210Text(text,1,{fontSize:24});
 }
 
+async function savePT210LabelSettings(){
+  const gapMm=Math.max(0,Math.min(30,Number(document.getElementById('pt210-label-gap')?.value)||0));
+  const font=Math.max(20,Math.min(60,parseInt(document.getElementById('pt210-label-font-size')?.value,10)||30));
+  settings.pt210LabelGapMm=gapMm;
+  settings.pt210LabelGapDots=Math.round(gapMm*8);
+  settings.pt210LabelFontSize=font;
+  await saveSettings();
+  showToast('تم حفظ إعدادات الملصق');
+}
+
 function openPT210Settings(){
   const sheet=document.getElementById('sheetContent');
   sheet.innerHTML=`
@@ -6138,7 +6160,12 @@ function openPT210Settings(){
       <div class="row-name">🖨️ طباعة مباشرة عبر Bluetooth</div>
       <div class="row-sub" style="margin-top:6px;">PT-210 تعمل بورق 58mm وبأوامر ESC/POS. فعّل Bluetooth ثم اربط الطابعة.</div>
       <button class="btn btn-brass btn-block" style="margin-top:14px;" onclick="connectPT210()">🔗 ربط PT-210</button>
-      <button class="btn btn-outline btn-block" style="margin-top:8px;" onclick="printPT210Text('اختبار Alpha Glass\\nGOOJPRT PT-210',1,{fontSize:27})">🧪 اختبار الطباعة</button>
+      <div class="field" style="margin-top:14px;"><label>ارتفاع الملصق</label><div class="row-sub">40 × 20 مم — ثابت</div></div>
+      <div class="field"><label>الفراغ بين الملصقات <span>• 0 إلى 30 مم</span></label><input type="number" id="pt210-label-gap" min="0" max="30" step="0.5" value="${Number(settings.pt210LabelGapMm ?? 2)}"></div>
+      <div class="field"><label>حجم خط الملصق <span>• 20 إلى 60</span></label><input type="number" id="pt210-label-font-size" min="20" max="60" step="1" value="${Number(settings.pt210LabelFontSize || 30)}"></div>
+      <div class="field"><label>محاذاة الملصق</label><select id="pt210-label-align"><option value="center">وسط</option><option value="right">يمين</option><option value="left">يسار</option></select></div>
+      <button class="btn btn-outline btn-block" style="margin-top:8px;" onclick="savePT210LabelSettings()">💾 حفظ إعدادات الملصق</button>
+      <button class="btn btn-outline btn-block" style="margin-top:8px;" onclick="printPT210Text('اختبار Alpha Glass\\nGOOJPRT PT-210',1,{fontSize:27})">🧪 اختبار الفاتورة</button>
     </div>`;
   openOverlay();
 }
@@ -6152,13 +6179,14 @@ function printProductLabels(productId, labelName){
   if(qty > 200) qty = 200;
 
   if(pt210Supported()) {
-    const labelAlign = document.getElementById('pt210-label-align')?.value || 'center';
+    const labelAlign = document.getElementById('pt210-label-align')?.value || settings.pt210LabelAlign || 'center';
     const labelOffset = Number(document.getElementById('pt210-label-offset')?.value || 0);
-    const labelFont = Number(document.getElementById('pt210-label-font-size')?.value || 30);
+    const labelFont = Number(document.getElementById('pt210-label-font-size')?.value || settings.pt210LabelFontSize || 30);
+    const labelGapDots = Math.round((Number(settings.pt210LabelGapMm ?? 2))*8);
     (async()=>{
       const ok = await connectPT210();
       if(!ok) return;
-      await printPT210Text(name, qty, {label:true, fontSize:labelFont, align:labelAlign, offset:labelOffset});
+      await printPT210Text(name, qty, {label:true, fontSize:labelFont, align:labelAlign, offset:labelOffset, labelGapDots});
     })();
     return;
   }
@@ -6168,8 +6196,6 @@ function printProductLabels(productId, labelName){
   window.print();
 }
 
-const LABEL_BATCH_SIZE = 10;
-
 function printCartLabels(){
   const ids = Object.keys(cart);
   if(ids.length === 0){ showToast('السلة فاضية'); return; }
@@ -6177,7 +6203,7 @@ function printCartLabels(){
   ids.forEach(id=>{
     const name = cartDisplayName[id] || (products.find(p=>p.id===id)||{}).name || '';
     const qty = cart[id];
-    const labelCount = Math.max(1, Math.ceil(qty / LABEL_BATCH_SIZE));
+    const labelCount = Math.max(1, qty);
     for(let i=0;i<labelCount;i++) labels.push(name);
   });
   if(pt210Supported()) {
@@ -7117,7 +7143,7 @@ function printOrderLabels(orderId){
     const realProduct = it.productId ? products.find(x=>x.id===it.productId) : null;
     const isOverride = realProduct && realProduct.name !== it.name;
     if(!isOverride) return;
-    const labelCount = Math.max(1, Math.ceil(it.qty / LABEL_BATCH_SIZE));
+    const labelCount = Math.max(1, it.qty);
     for(let i=0;i<labelCount;i++) labels.push(it.name);
   });
   if(labels.length === 0){ showToast('لا توجد أصناف بديلة تحتاج ملصقات'); return; }
