@@ -5786,6 +5786,20 @@ function buildCatalogText(type){
       return out;
     };
 
+    // Separator color follows the brand for ESD. WhatsApp text cannot style
+    // arbitrary characters, so use colored-circle emoji as the visible dots.
+    const brandSeparator = (brand) => {
+      const key=String(brand||'').trim().toLowerCase();
+      if(/realme|ريلمي/.test(key)) return '🟡';
+      if(/oppo|أوبو/.test(key)) return '🟢';
+      if(/redmi|xiaomi|ردمي|شاومي/.test(key)) return '🔴';
+      if(/samsung|سامسونج/.test(key)) return '🔵';
+      if(/honor|اونر|أونر/.test(key)) return '🔷';
+      if(/infinix|انفينيكس/.test(key)) return '🟢';
+      if(/apple|آبل/.test(key)) return '⚪';
+      return '⚫';
+    };
+
     function collectSection(sectionType, useCompatibility){
       const seen = new Set();
       const result = [];
@@ -5808,7 +5822,7 @@ function buildCatalogText(type){
     }
 
     // SANS BORDURE first, as one section.
-    const sans = collectSection('bordure', true);
+    const sans = collectSection('bordure', false);
     if(sans.length){
       lines.push('*📱 SANS BORDURE*');
       compactNames(sans.map(x=>x.isNew ? `🆕 *${x.name}*` : x.name), '🟠').forEach(x=>lines.push(x));
@@ -5841,7 +5855,7 @@ function buildCatalogText(type){
       esdBrands.forEach(brand=>{
         lines.push(`🍎 *━━ ${brand} ━━*`);
         const names=esdByBrand[brand].sort((a,b)=>a.name.localeCompare(b.name,undefined,{numeric:true,sensitivity:'base'}));
-        compactNames(names.map(x=>x.isNew ? `🆕 *${x.name}*` : x.name), '🔵').forEach(x=>lines.push(x));
+        compactNames(names.map(x=>x.isNew ? `🆕 *${x.name}*` : x.name), brandSeparator(brand)).forEach(x=>lines.push(x));
       });
       lines.push('');
     }
