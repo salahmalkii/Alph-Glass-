@@ -3736,6 +3736,48 @@ function applyThermalPrintStyle(){
   `;
 }
 
+// تُستعمل فقط عند تعذّر الطباعة المباشرة عبر PT-210 (Bluetooth/RawBT) والرجوع لطباعة
+// المتصفح العادية (window.print). هنا الملصقات فعليًا ملصقات مقصوصة سلفًا بأبعاد ثابتة
+// 40×20مم (وليست لفة ورق حراري متواصلة)، فنجعل كل ملصق "صفحة طباعة" مستقلة بنفس
+// المقاس الفعلي مع قطع صفحة بعد كل ملصق — هذا هو الفراغ/الفصل بين الملصقات فعليًا،
+// بدل خط متقطع للقص اليدوي (لأنه ما فيه قص يدوي هنا، الطابعة توقف عند حافة كل ملصق).
+function applyLabelPrintStyle(){
+  let styleEl = document.getElementById('labelPrintStyle');
+  if(!styleEl){
+    styleEl = document.createElement('style');
+    styleEl.id = 'labelPrintStyle';
+    document.head.appendChild(styleEl);
+  }
+  styleEl.textContent = `
+    @media print{
+      @page{ size: 40mm 20mm; margin: 0mm; }
+      html, body{ width:40mm; }
+      #labelPrintView{ width:40mm !important; padding:0 !important; }
+      .label-grid{
+        display:block !important;
+        width:40mm !important;
+      }
+      .label-box{
+        width:40mm !important;
+        height:20mm !important;
+        box-sizing:border-box;
+        border:none !important;
+        border-radius:0 !important;
+        padding:0 3mm !important;
+        margin:0 !important;
+        font-size:15px !important;
+        display:flex !important;
+        align-items:center;
+        justify-content:center;
+        text-align:center;
+        overflow:hidden;
+        page-break-after:always;
+        page-break-inside:avoid;
+      }
+    }
+  `;
+}
+
 function printInvoice(inv){
   if(pt210Supported()){
     printPT210Invoice(inv);
@@ -6272,16 +6314,26 @@ function openPT210Settings(){
 }
 
 async function testPT210Print(){
+  // مهم: اختبار الطباعة لازم يستعمل بالضبط نفس وضع "ملصق" (label:true) وحجم الملصق
+  // والفراغ اللي تستعملهم الملصقات الحقيقية (40×20مم) — وليس وضع الفاتورة (طول متغيّر
+  // بدون تحديد حجم الملصق). قبل هذا الإصلاح كان الاختبار يطبع بدون تحديد حجم الملصق
+  // ويغذّي الورق بمقدار عشوائي (3 أسطر) بدل مسافة الفراغ الحقيقية بين الملصقات،
+  // فما كانتش النتيجة تعكس الطباعة الفعلية ولا الفراغ يطلع صحيح على الملصقات الحقيقية.
+  const gapMm = Number(document.getElementById('pt210-label-gap')?.value ?? settings.pt210LabelGapMm ?? 2);
+  const font = Number(document.getElementById('pt210-label-font-size')?.value || settings.pt210LabelFontSize || 30);
+  const align = document.getElementById('pt210-label-align')?.value || settings.pt210LabelAlign || 'center';
+  const labelGapDots = Math.round(gapMm * 8);
   const text='Alpha Glass\nPT-210 TEST';
+  const opts = {label:true, fontSize:font, align, labelGapDots};
   if(pt210Supported()){
     const connected=await connectPT210();
     if(connected){
-      const done=await printPT210Text(text,1,{fontSize:27});
+      const done=await printPT210Text(text,1,opts);
       if(done) return;
     }
   }
   if(isAndroidDevice()){
-    const ok=await printPT210ViaRawBT(text,1,{fontSize:27});
+    const ok=await printPT210ViaRawBT(text,1,opts);
     if(ok){ showToast('تم إرسال الاختبار إلى RawBT'); return; }
     showToast('لم يتم الاتصال بالطابعة. جرّب RawBT بعد ربط MTP-2');
   }
@@ -6315,7 +6367,7 @@ function printProductLabels(productId, labelName){
   }
   const grid = document.getElementById('labelGridContent');
   grid.innerHTML = Array.from({length: qty}).map(()=>`<div class="label-box">${escapeHtml(name)}</div>`).join('');
-  applyThermalPrintStyle();
+  applyLabelPrintStyle();
   window.print();
 }
 
@@ -6352,7 +6404,7 @@ function printCartLabels(){
   }
   const grid = document.getElementById('labelGridContent');
   grid.innerHTML = labels.map(n=>`<div class="label-box">${escapeHtml(n)}</div>`).join('');
-  applyThermalPrintStyle();
+  applyLabelPrintStyle();
   window.print();
 }
 
@@ -7277,6 +7329,49 @@ function toggleDraftOrderEditMode(orderId){
   renderDraftOrderItemsList(orderId);
 }
 
+function printLabelsList(labels){
+  // مسار موحّد لطباعة قائمة أسماء ملصقات: مباشرة على PT-210 عبر Bluetooth أو RawBT
+  // (بنفس حجم وفراغ الملصق المضبوطين في إعدادات الطابعة)، وإلا رجوعًا للطباعة العادية.
+  if(labels.length === 0) return;
+  const labelAlign = settings.pt210LabelAlign || 'center';
+  const labelFont = Number(settings.pt210LabelFontSize || 30);
+  const labelGapDots = Math.round((Number(settings.pt210LabelGapMm ?? 2))*8);
+  if(pt210Supported()){
+    (async()=>{
+      const connected=await connectPT210();
+      if(connected){
+        for(const name of labels){
+          const done=await printPT210Text(name,1,{label:true, fontSize:labelFont, align:labelAlign, labelGapDots});
+          if(!done) break;
+        }
+        return;
+      }
+      if(isAndroidDevice()){
+        for(const name of labels){
+          const ok=await printPT210ViaRawBT(name,1,{label:true, fontSize:labelFont, align:labelAlign, labelGapDots});
+          if(!ok) break;
+          await new Promise(r=>setTimeout(r,250));
+        }
+      }
+    })();
+    return;
+  }
+  if(isAndroidDevice()){
+    (async()=>{
+      for(const name of labels){
+        const ok=await printPT210ViaRawBT(name,1,{label:true, fontSize:labelFont, align:labelAlign, labelGapDots});
+        if(!ok) break;
+        await new Promise(r=>setTimeout(r,250));
+      }
+    })();
+    return;
+  }
+  const grid = document.getElementById('labelGridContent');
+  grid.innerHTML = labels.map(n=>`<div class="label-box">${escapeHtml(n)}</div>`).join('');
+  applyLabelPrintStyle();
+  window.print();
+}
+
 function printOrderLabels(orderId){
   const order = draftOrders.find(x=>x.id===orderId);
   if(!order || order.items.length === 0){ showToast('لا توجد أصناف'); return; }
@@ -7289,9 +7384,7 @@ function printOrderLabels(orderId){
     for(let i=0;i<labelCount;i++) labels.push(it.name);
   });
   if(labels.length === 0){ showToast('لا توجد أصناف بديلة تحتاج ملصقات'); return; }
-  const grid = document.getElementById('labelGridContent');
-  grid.innerHTML = labels.map(n=>`<div class="label-box">${escapeHtml(n)}</div>`).join('');
-  window.print();
+  printLabelsList(labels);
 }
 
 function printSingleOrderItemLabel(orderId, idx){
@@ -7299,9 +7392,7 @@ function printSingleOrderItemLabel(orderId, idx){
   if(!order || !order.items[idx]) return;
   const it = order.items[idx];
   const labelCount = Math.max(1, it.qty);
-  const grid = document.getElementById('labelGridContent');
-  grid.innerHTML = Array.from({length: labelCount}).map(()=>`<div class="label-box">${escapeHtml(it.name)}</div>`).join('');
-  window.print();
+  printLabelsList(Array.from({length: labelCount}).map(()=>it.name));
 }
 
 function renderDraftOrderItemsList(orderId){
