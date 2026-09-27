@@ -5770,53 +5770,94 @@ function buildCatalogText(type){
   lines.push('');
 
   if(type==='glass'){
-    const seenGlassNames = new Set();
-    const brandGroups = {};
-    items.forEach(p=>{
-      // UV is a stock-only catalog: never expand it through compatibility groups.
-      // ESD / SANS BORDURE keep their existing compatibility behavior.
-      let grp = null;
-      if(normalizeGlassType(p.glassType) !== 'uv'){
-        grp = p.compatGroupId ? compatGroups.find(g=>g.id===p.compatGroupId) : null;
-        if(!grp){
-          grp = compatGroups.find(g=>g.models.some(m => matchesModel(p.name, m)));
-        }
+    const normalized = p => normalizeGlassType(p.glassType);
+    const stockItems = items;
+
+    // The agreed catalog structure:
+    // 1) SANS BORDURE = one separate section
+    // 2) ESD = separate section, grouped by company
+    // 3) UV = one separate section, STOCK ONLY (never compatibility expansion)
+    // The compatibility expansion remains unchanged for SANS BORDURE / ESD.
+    const compactNames = (arr, separator) => {
+      const out=[];
+      for(let i=0;i<arr.length;i+=7){
+        out.push(arr.slice(i,i+7).join(` ${separator} `));
       }
-      const namesToList = (normalizeGlassType(p.glassType) === 'uv') ? [p.name] : (grp ? grp.models : [p.name]);
-      const brandKey = p.brand || 'أخرى';
-      const normalizedType = normalizeGlassType(p.glassType);
-      const typeKey = normalizedType ? (glassTypeLabel[normalizedType] || normalizedType) : 'أخرى';
-      namesToList.forEach(name=>{
-        const key = name.trim().toLowerCase();
-        if(seenGlassNames.has(key)) return;
-        seenGlassNames.add(key);
-        if(!brandGroups[brandKey]) brandGroups[brandKey] = {};
-        if(!brandGroups[brandKey][typeKey]) brandGroups[brandKey][typeKey] = [];
-        brandGroups[brandKey][typeKey].push({ name, isNew: !!p.isNew });
+      return out;
+    };
+
+    function collectSection(sectionType, useCompatibility){
+      const seen = new Set();
+      const result = [];
+      stockItems.filter(p=>normalized(p)===sectionType).forEach(p=>{
+        let names = [p.name];
+        if(useCompatibility){
+          let grp = p.compatGroupId ? compatGroups.find(g=>g.id===p.compatGroupId) : null;
+          if(!grp) grp = compatGroups.find(g=>g.models.some(m=>matchesModel(p.name,m)));
+          if(grp) names = grp.models;
+        }
+        names.forEach(name=>{
+          const clean=String(name||'').trim();
+          const key=clean.toLowerCase();
+          if(!clean || seen.has(key)) return;
+          seen.add(key);
+          result.push({name:clean,isNew:!!p.isNew});
+        });
+      });
+      return result.sort((a,b)=>a.name.localeCompare(b.name,undefined,{numeric:true,sensitivity:'base'}));
+    }
+
+    // SANS BORDURE first, as one section.
+    const sans = collectSection('bordure', true);
+    if(sans.length){
+      lines.push('*📱 SANS BORDURE*');
+      compactNames(sans.map(x=>x.isNew ? `🆕 *${x.name}*` : x.name), '🟠').forEach(x=>lines.push(x));
+      lines.push('');
+    }
+
+    // ESD grouped by company. Compatibility expansion is retained here.
+    const esdByBrand = {};
+    stockItems.filter(p=>normalized(p)==='esd').forEach(p=>{
+      let names=[p.name];
+      let grp = p.compatGroupId ? compatGroups.find(g=>g.id===p.compatGroupId) : null;
+      if(!grp) grp = compatGroups.find(g=>g.models.some(m=>matchesModel(p.name,m)));
+      if(grp) names=grp.models;
+      const brand=p.brand || 'أخرى';
+      if(!esdByBrand[brand]) esdByBrand[brand]=[];
+      names.forEach(name=>{
+        const clean=String(name||'').trim();
+        if(!clean) return;
+        if(!esdByBrand[brand].some(x=>x.name.toLowerCase()===clean.toLowerCase())){
+          esdByBrand[brand].push({name:clean,isNew:!!p.isNew});
+        }
       });
     });
-    const brandNames = Object.keys(brandGroups).sort((a,b)=>{
-      if(a==='أخرى') return 1;
-      if(b==='أخرى') return -1;
+    const esdBrands=Object.keys(esdByBrand).sort((a,b)=>{
+      if(a==='أخرى') return 1; if(b==='أخرى') return -1;
       return a.localeCompare(b);
     });
-    brandNames.forEach(brand=>{
-      lines.push(`*📱 ${brand}*`);
-      const typeNames = Object.keys(brandGroups[brand]).sort((a,b)=>{
-        if(a==='أخرى') return 1;
-        if(b==='أخرى') return -1;
-        return a.localeCompare(b);
-      });
-      typeNames.forEach(typeKey=>{
-        if(typeKey !== 'أخرى') lines.push(`_${typeKey}_`);
-        brandGroups[brand][typeKey]
-          .sort((a,b)=> a.name.localeCompare(b.name, undefined, {numeric:true, sensitivity:'base'}))
-          .forEach(item=>{
-            lines.push(item.isNew ? `🆕 *${item.name}* (جديد!)` : `✅ ${item.name}`);
-          });
+    if(esdBrands.length){
+      lines.push('*🔵 ESD*');
+      esdBrands.forEach(brand=>{
+        lines.push(`🍎 *━━ ${brand} ━━*`);
+        const names=esdByBrand[brand].sort((a,b)=>a.name.localeCompare(b.name,undefined,{numeric:true,sensitivity:'base'}));
+        compactNames(names.map(x=>x.isNew ? `🆕 *${x.name}*` : x.name), '🔵').forEach(x=>lines.push(x));
       });
       lines.push('');
-    });
+    }
+
+    // UV is deliberately NOT grouped by company and uses STOCK ONLY.
+    const uv = stockItems.filter(p=>normalized(p)==='uv')
+      .map(p=>({name:String(p.name||'').trim(),isNew:!!p.isNew}))
+      .filter(x=>x.name)
+      .filter((x,i,a)=>a.findIndex(y=>y.name.toLowerCase()===x.name.toLowerCase())===i)
+      .sort((a,b)=>a.name.localeCompare(b.name,undefined,{numeric:true,sensitivity:'base'}));
+    if(uv.length){
+      lines.push('*🟣 UV*');
+      compactNames(uv.map(x=>x.isNew ? `🆕 *${x.name}*` : x.name), '🟣').forEach(x=>lines.push(x));
+      lines.push('');
+    }
+
     if(lines[lines.length-1] === '') lines.pop();
   }else{
     items.forEach(p=>{
