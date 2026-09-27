@@ -5988,14 +5988,21 @@ async function printPT210ViaRawBT(text, copies=1, opts={}){
 }
 
 async function connectPT210(){
-  if(isAndroidDevice()){
-    showToast('على Android استخدم RawBT مع طابعة MTP-2؛ PT-210 تعمل عبر Bluetooth التقليدي');
-    return false;
-  }
+  /*
+   * PT-210 revisions differ: some expose BLE GATT while others are used as
+   * classic Bluetooth MTP-2 devices. Android Chrome can use Web Bluetooth
+   * when the printer exposes GATT, so do NOT disable direct Bluetooth on Android.
+   * RawBT remains the fallback for classic-Bluetooth units.
+   */
   if(!pt210Supported()){
-    showToast('الطباعة المباشرة تحتاج Chrome عبر HTTPS');
+    if(isAndroidDevice()){
+      showToast('فعّل Bluetooth وافتح Alpha Glass من Chrome؛ إذا لم تظهر PT-210 استخدم RawBT كبديل');
+    }else{
+      showToast('الطباعة المباشرة تحتاج Chrome عبر HTTPS');
+    }
     return false;
   }
+
   if(pt210WriteCharacteristic && pt210Device?.gatt?.connected) return true;
   if(pt210Connecting) return false;
   pt210Connecting = true;
@@ -6265,12 +6272,19 @@ function openPT210Settings(){
 }
 
 async function testPT210Print(){
-  if(isAndroidDevice()){
-    const ok=await printPT210ViaRawBT('اختبار Alpha Glass\nGOOJPRT PT-210',1,{fontSize:27});
-    if(!ok) showToast('ثبّت RawBT واضبط MTP-2 أولاً');
-    return;
+  const text='Alpha Glass\nPT-210 TEST';
+  if(pt210Supported()){
+    const connected=await connectPT210();
+    if(connected){
+      const done=await printPT210Text(text,1,{fontSize:27});
+      if(done) return;
+    }
   }
-  await printPT210Text('اختبار Alpha Glass\nGOOJPRT PT-210',1,{fontSize:27});
+  if(isAndroidDevice()){
+    const ok=await printPT210ViaRawBT(text,1,{fontSize:27});
+    if(ok){ showToast('تم إرسال الاختبار إلى RawBT'); return; }
+    showToast('لم يتم الاتصال بالطابعة. جرّب RawBT بعد ربط MTP-2');
+  }
 }
 
 function printProductLabels(productId, labelName){
@@ -6285,17 +6299,17 @@ function printProductLabels(productId, labelName){
   const labelOffset = Number(document.getElementById('pt210-label-offset')?.value || 0);
   const labelFont = Number(document.getElementById('pt210-label-font-size')?.value || settings.pt210LabelFontSize || 30);
   const labelGapDots = Math.round((Number(settings.pt210LabelGapMm ?? 2))*8);
-  if(isAndroidDevice()){
-    printPT210ViaRawBT(name, qty, {label:true, fontSize:labelFont, align:labelAlign, offset:labelOffset, labelGapDots}).then(ok=>{
-      if(ok) showToast('تم إرسال الملصقات إلى RawBT');
-    });
-    return;
-  }
   if(pt210Supported()) {
     (async()=>{
       const ok = await connectPT210();
-      if(!ok) return;
-      await printPT210Text(name, qty, {label:true, fontSize:labelFont, align:labelAlign, offset:labelOffset, labelGapDots});
+      if(ok){
+        await printPT210Text(name, qty, {label:true, fontSize:labelFont, align:labelAlign, offset:labelOffset, labelGapDots});
+        return;
+      }
+      if(isAndroidDevice()){
+        const rawOk=await printPT210ViaRawBT(name, qty, {label:true, fontSize:labelFont, align:labelAlign, offset:labelOffset, labelGapDots});
+        if(rawOk) showToast('تم إرسال الملصقات إلى RawBT');
+      }
     })();
     return;
   }
@@ -6315,24 +6329,23 @@ function printCartLabels(){
     const labelCount = Math.max(1, qty);
     for(let i=0;i<labelCount;i++) labels.push(name);
   });
-  if(isAndroidDevice()){
-    const gapDots=Math.round((Number(settings.pt210LabelGapMm ?? 2))*8);
-    (async()=>{
-      for(const name of labels){
-        const ok=await printPT210ViaRawBT(name,1,{label:true,fontSize:Number(settings.pt210LabelFontSize||30),align:settings.pt210LabelAlign||'center',labelGapDots:gapDots});
-        if(!ok) break;
-        await new Promise(r=>setTimeout(r,250));
-      }
-    })();
-    return;
-  }
   if(pt210Supported()) {
     (async()=>{
-      const ok=await connectPT210();
-      if(!ok) return;
-      for(const name of labels) {
-        const done=await printPT210Text(name,1,{label:true,fontSize:Number(settings.pt210LabelFontSize||30),align:settings.pt210LabelAlign||'center',labelGapDots:Math.round((Number(settings.pt210LabelGapMm ?? 2))*8)});
-        if(!done) break;
+      const connected=await connectPT210();
+      if(connected){
+        for(const name of labels) {
+          const done=await printPT210Text(name,1,{label:true,fontSize:Number(settings.pt210LabelFontSize||30),align:settings.pt210LabelAlign||'center',labelGapDots:Math.round((Number(settings.pt210LabelGapMm ?? 2))*8)});
+          if(!done) break;
+        }
+        return;
+      }
+      if(isAndroidDevice()){
+        const gapDots=Math.round((Number(settings.pt210LabelGapMm ?? 2))*8);
+        for(const name of labels){
+          const ok=await printPT210ViaRawBT(name,1,{label:true,fontSize:Number(settings.pt210LabelFontSize||30),align:settings.pt210LabelAlign||'center',labelGapDots:gapDots});
+          if(!ok) break;
+          await new Promise(r=>setTimeout(r,250));
+        }
       }
     })();
     return;
