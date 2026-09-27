@@ -3859,7 +3859,7 @@ function openInvoiceEditForm(invoiceId){
       <h3>تعديل فاتورة #${inv.number}</h3>
       <button class="icon-btn" onclick='showInvoicePreview(${JSON.stringify(inv).replace(/'/g,"&#39;")}, false)'>✕</button>
     </div>
-    <div class="row-sub" style="margin-bottom:12px;">غيّر الكمية (لتسجيل إرجاع) أو السعر (لتعديل أو تخفيض قيمة الصنف). سيُعاد فرق الكمية للمخزون تلقائيًا.</div>
+    <div class="row-sub" style="margin-bottom:12px;">يمكنك تعديل الكمية أو السعر. عند زيادة الكمية سيُخصم الفرق من المخزون، وعند إنقاصها يُعاد الفرق للمخزون تلقائيًا.</div>
     ${typeNames.length > 0 ? `
     <div class="section-title"><span>تعديل السعر حسب النوع (لعدة أصناف دفعة وحدة)</span></div>
     <div class="ledger" style="margin-bottom:14px;">
@@ -3886,7 +3886,7 @@ function openInvoiceEditForm(invoiceId){
             <div class="row-sub">${typeLabel ? typeLabel + ' — ' : ''}الكمية</div>
           </div>
           <div style="width:60px;">
-            <input type="number" inputmode="numeric" class="mono" id="edit-qty-${idx}" value="${it.qty}" min="0" max="${it.qty}"
+            <input type="number" inputmode="numeric" class="mono" id="edit-qty-${idx}" value="${it.qty}" min="0"
               style="width:100%;padding:8px 4px;border-radius:8px;border:1.5px solid var(--border-strong);background:var(--surface-soft);color:var(--text);font-size:13px;text-align:center;">
           </div>
           <div style="width:80px;">
@@ -3941,19 +3941,23 @@ async function saveInvoiceEditForm(invoiceId){
 
   const newItems = [];
   let itemsTotal = 0, cost = 0;
+  const stockDeltas = [];
+
   inv.items.forEach((it, idx)=>{
     const qtyInput = document.getElementById('edit-qty-' + idx);
     const priceInput = document.getElementById('edit-price-' + idx);
-    let newQty = parseInt(qtyInput.value);
+    let newQty = parseInt(qtyInput?.value,10);
     if(isNaN(newQty) || newQty < 0) newQty = 0;
-    if(newQty > it.qty) newQty = it.qty; // quantity can only decrease (returns)
-    let newPrice = parseFloat(priceInput.value);
+    let newPrice = parseFloat(priceInput?.value);
     if(isNaN(newPrice) || newPrice < 0) newPrice = it.sellPrice;
-    const diff = it.qty - newQty;
-    if(diff > 0){
-      const p = it.productId ? products.find(x=>x.id===it.productId) : products.find(x=>x.name===it.name);
-      if(p) p.qty += diff;
+
+    const p = it.productId ? products.find(x=>x.id===it.productId) : products.find(x=>x.name===it.name);
+    const delta = newQty - it.qty; // positive = take more from stock; negative = return to stock
+    if(delta > 0 && p && Number(p.qty || 0) < delta){
+      throw new Error(`المخزون غير كافٍ للصنف: ${it.name}`);
     }
+    if(p) stockDeltas.push({p, delta});
+
     if(newQty > 0){
       itemsTotal += newQty * newPrice;
       cost += newQty * it.buyPrice;
@@ -3961,13 +3965,10 @@ async function saveInvoiceEditForm(invoiceId){
     }
   });
 
-  if(newItems.length === 0){
-    showToast('يجب أن يبقى صنف واحد على الأقل في الفاتورة');
-    return;
-  }
-  itemsTotal = Math.round((itemsTotal + Number.EPSILON) * 100) / 100;
+  if(newItems.length === 0){ showToast('يجب أن يبقى صنف واحد على الأقل في الفاتورة'); return; }
 
-  // خصم إضافي على الفاتورة (اختياري) — نقرأه مباشرة من الواجهة وقت الحفظ
+  // لا نغيّر المخزون قبل انتهاء كل أسئلة التأكيد، حتى لا يضيع التعديل إذا ضغط المستخدم "تراجع".
+  itemsTotal = Math.round((itemsTotal + Number.EPSILON) * 100) / 100;
   const activeChip = document.querySelector('#editDiscountChips .chip.active');
   const discType = activeChip ? activeChip.dataset.type : 'none';
   let discountAmount = 0;
@@ -3976,48 +3977,37 @@ async function saveInvoiceEditForm(invoiceId){
     let val = isNaN(rawVal) || rawVal < 0 ? 0 : rawVal;
     if(discType === 'percent' && val > 100) val = 100;
     discountAmount = discType === 'percent' ? itemsTotal * (val / 100) : val;
-    if(discountAmount > itemsTotal) discountAmount = itemsTotal;
+    discountAmount = Math.min(discountAmount, itemsTotal);
     discountAmount = Math.round((discountAmount + Number.EPSILON) * 100) / 100;
   }
   const total = Math.round((itemsTotal - discountAmount + Number.EPSILON) * 100) / 100;
 
-  // الدفع (اختياري): إن تُرك فارغًا نعتبر الفاتورة مدفوعة بالكامل كالمعتاد (السلوك القديم،
-  // بما فيه سؤال التاجر عن مصير أي فرق زائد). إن أُدخل مبلغ أقل من الإجمالي، نسجّل الفرق كدين صراحة.
   const paidNowRaw = document.getElementById('edit-paid-now')?.value;
   const hasPaidNowInput = paidNowRaw !== undefined && String(paidNowRaw).trim() !== '';
+  let paidNowVal = hasPaidNowInput ? parseFloat(paidNowRaw) : (Number(inv.paidNow || 0));
+  if(isNaN(paidNowVal) || paidNowVal < 0) paidNowVal = 0;
+  if(paidNowVal > total) paidNowVal = total;
+  const newRemaining = Math.max(0, Math.round((total - paidNowVal + Number.EPSILON) * 100) / 100);
 
-  if(hasPaidNowInput){
-    let paidNowVal = parseFloat(paidNowRaw);
-    if(isNaN(paidNowVal) || paidNowVal < 0) paidNowVal = 0;
-    if(paidNowVal > total) paidNowVal = total;
-    const remaining = Math.round((total - paidNowVal + Number.EPSILON) * 100) / 100;
-
-    if(remaining > 0 && !inv.customerId){
-      pendingInvoiceEdit = { invoiceId, newItems, total, cost, oldTotal: inv.total, discountAmount, rawTotal: itemsTotal, paidNowOverride: paidNowVal };
-      openInvoiceEditDebtCustomerPrompt();
-      return;
-    }
-
-    await commitInvoiceEdit(invoiceId, newItems, total, cost, false, { paidNowOverride: paidNowVal, discountAmount, rawTotal: itemsTotal });
+  // إذا أدخل المستخدم دفعًا صريحًا، أو أصبح هناك دين بعد التعديل، نحتاج اختيار زبون إن لم تكن الفاتورة مرتبطة.
+  if(newRemaining > 0 && !inv.customerId){
+    pendingInvoiceEdit = { invoiceId, newItems, total, cost, oldTotal: inv.total, discountAmount, rawTotal: itemsTotal, paidNowOverride: paidNowVal, stockDeltas };
+    openInvoiceEditDebtCustomerPrompt();
     return;
   }
 
-  const oldRemaining = inv.remaining || 0;
-  const oldTotal = inv.total;
+  // إذا كانت الفاتورة مدفوعة بالكامل سابقًا وأصبح الإجمالي أقل، لا نفترض مصير الفرق.
+  const oldRemaining = Number(inv.remaining || 0);
+  const oldTotal = Number(inv.total || 0);
   const excess = Math.round((oldTotal - total + Number.EPSILON) * 100) / 100;
-
-  // الفاتورة كانت مدفوعة بالكامل (لا دين عليها) والتعديل خفّض الإجمالي — يعني فيه فرق
-  // زائد استُلم فعلاً من الزبون. لا نفترض مصيره تلقائيًا (استرجاع نقد أم رصيد له)،
-  // بل نسأل التاجر في كل مرة، حسب ما طلب.
-  if(oldRemaining <= 0 && excess > 0){
-    pendingInvoiceEdit = { invoiceId, newItems, total, cost, oldTotal, excess, discountAmount, rawTotal: itemsTotal };
+  if(oldRemaining <= 0 && excess > 0 && !hasPaidNowInput){
+    pendingInvoiceEdit = { invoiceId, newItems, total, cost, oldTotal, excess, discountAmount, rawTotal: itemsTotal, paidNowOverride: paidNowVal, stockDeltas };
     openInvoiceEditExcessPrompt();
     return;
   }
 
-  await commitInvoiceEdit(invoiceId, newItems, total, cost, false, { discountAmount, rawTotal: itemsTotal });
+  await commitInvoiceEdit(invoiceId, newItems, total, cost, false, { paidNowOverride: paidNowVal, discountAmount, rawTotal: itemsTotal, stockDeltas });
 }
-
 let pendingInvoiceEdit = null;
 
 function openInvoiceEditDebtCustomerPrompt(){
@@ -4065,7 +4055,7 @@ async function confirmInvoiceEditDebtCustomer(){
   if(!inv){ pendingInvoiceEdit = null; return; }
   inv.customerId = id;
   pendingInvoiceEdit = null;
-  await commitInvoiceEdit(p.invoiceId, p.newItems, p.total, p.cost, false, { paidNowOverride: p.paidNowOverride, discountAmount: p.discountAmount, rawTotal: p.rawTotal });
+  await commitInvoiceEdit(p.invoiceId, p.newItems, p.total, p.cost, false, { paidNowOverride: p.paidNowOverride, discountAmount: p.discountAmount, rawTotal: p.rawTotal, stockDeltas: p.stockDeltas });
 }
 
 function openInvoiceEditExcessPrompt(){
@@ -4108,7 +4098,7 @@ async function resolveInvoiceEditExcess(choice){
   if(choice === 'refund'){
     pendingInvoiceEdit = null;
     // استرجاع نقدي فقط: يخفّض إجمالي الفاتورة (وبالتالي "النقد المحصّل" تلقائيًا) بدون أي دين أو رصيد.
-    await commitInvoiceEdit(p.invoiceId, p.newItems, p.total, p.cost, true, { discountAmount: p.discountAmount, rawTotal: p.rawTotal });
+    await commitInvoiceEdit(p.invoiceId, p.newItems, p.total, p.cost, true, { discountAmount: p.discountAmount, rawTotal: p.rawTotal, stockDeltas: p.stockDeltas, paidNowOverride: p.paidNowOverride });
     return;
   }
 
@@ -4160,7 +4150,7 @@ async function commitInvoiceEditExcessCredit(customerId){
   await Promise.all([saveCustomers(), saveCustomerTx()]);
   if(!inv.customerId) inv.customerId = c.id; // نربط الفاتورة بالزبون حتى يظهر الرصيد في سجله لاحقًا
   pendingInvoiceEdit = null;
-  await commitInvoiceEdit(p.invoiceId, p.newItems, p.total, p.cost, true, { discountAmount: p.discountAmount, rawTotal: p.rawTotal });
+  await commitInvoiceEdit(p.invoiceId, p.newItems, p.total, p.cost, true, { discountAmount: p.discountAmount, rawTotal: p.rawTotal, stockDeltas: p.stockDeltas, paidNowOverride: p.paidNowOverride });
 }
 
 async function commitInvoiceEdit(invoiceId, newItems, total, cost, skipDeltaTx, opts){
@@ -4168,7 +4158,15 @@ async function commitInvoiceEdit(invoiceId, newItems, total, cost, skipDeltaTx, 
   if(!inv) return;
   opts = opts || {};
 
-  const saveOps = [saveProducts()];
+  const saveOps = [];
+
+  // تطبيق فرق المخزون مرة واحدة بعد انتهاء كل التأكيدات.
+  if(Array.isArray(opts.stockDeltas)){
+    for(const d of opts.stockDeltas){
+      if(d && d.p) d.p.qty = Math.max(0, Number(d.p.qty || 0) - Number(d.delta || 0));
+    }
+    saveOps.push(saveProducts());
+  }
 
   // المسار العادي (لا يوجد فرق زائد مبهم): نحسب فرق الدين كالمعتاد. عند التعامل مع الفرق
   // الزائد عبر نافذة الاختيار أعلاه (استرجاع/رصيد) نتخطى هذا الحساب لأنه عُولج صراحةً هناك.
@@ -4191,7 +4189,7 @@ async function commitInvoiceEdit(invoiceId, newItems, total, cost, skipDeltaTx, 
         saveOps.push(saveCustomers(), saveCustomerTx());
       }
     }
-    if(inv.customerId) inv.remaining = newRemaining;
+    inv.remaining = newRemaining;
     if(opts.paidNowOverride != null) inv.paidNow = paidNow;
   }
 
