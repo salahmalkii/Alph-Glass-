@@ -3907,12 +3907,16 @@ function openInvoiceEditForm(invoiceId){
       <label>${editDiscountType==='percent' ? 'نسبة الخصم %' : 'مبلغ الخصم'}</label>
       <input type="number" inputmode="decimal" id="edit-discount-value" placeholder="0" min="0" step="0.01">
     </div>
-    <div class="section-title"><span>الدفع (اختياري)</span></div>
-    <div class="field">
-      <label>المبلغ الذي دفعه الزبون فعليًا من هذه الفاتورة</label>
-      <input type="number" inputmode="decimal" id="edit-paid-now" placeholder="اتركه فارغًا = الفاتورة مدفوعة بالكامل">
+    <div class="section-title"><span>طريقة الدفع</span></div>
+    <div class="chip-row" id="editPaymentChips" style="margin-bottom:10px;">
+      <button type="button" class="chip ${inv.remaining > 0 ? '' : 'active'}" data-pay="cash" onclick="setEditPaymentMode('cash')">💵 نقدًا</button>
+      <button type="button" class="chip ${inv.remaining > 0 ? 'active' : ''}" data-pay="credit" onclick="setEditPaymentMode('credit')">💳 دين</button>
     </div>
-    <div class="row-sub" style="margin-bottom:14px;">إذا كتبت مبلغًا أقل من الإجمالي، سنسجّل الفرق كدين على الزبون (سنطلب اختيار الزبون إن لم تكن الفاتورة مرتبطة بأحد).</div>
+    <div class="field" id="editPaidNowWrap" style="display:${inv.remaining > 0 ? '' : 'none'};">
+      <label>المبلغ الذي دفعه الزبون فعليًا من هذه الفاتورة</label>
+      <input type="number" inputmode="decimal" id="edit-paid-now" value="${inv.remaining > 0 ? (Number(inv.paidNow || 0)) : ''}" placeholder="0 = كامل المبلغ دينًا" min="0" step="0.01">
+    </div>
+    <div class="row-sub" id="editPaymentHint" style="margin-bottom:14px;">${inv.remaining > 0 ? 'المبلغ المتبقي يسجل كدين على الزبون.' : 'نقدًا = المبلغ كاملًا مدفوع.'}</div>
     <div class="sheet-actions">
       <button class="btn btn-outline" onclick='showInvoicePreview(${JSON.stringify(inv).replace(/'/g,"&#39;")}, false)'>تراجع</button>
       <button class="btn btn-brass" onclick="saveInvoiceEditForm('${inv.id}')">حفظ التعديلات</button>
@@ -3933,6 +3937,28 @@ function applyBulkPriceForType(items, typeLabel, newPriceStr){
     }
   });
   showToast(`تم تحديث سعر ${count} صنف من نوع ${typeLabel} — اضغط "حفظ التعديلات" لتثبيت التغيير`);
+}
+
+function setEditPaymentMode(mode){
+  const wrap = document.getElementById('editPaidNowWrap');
+  const input = document.getElementById('edit-paid-now');
+  const hint = document.getElementById('editPaymentHint');
+  const chips = document.querySelectorAll('#editPaymentChips .chip');
+  chips.forEach(ch=>ch.classList.toggle('active', ch.dataset.pay === mode));
+  if(mode === 'credit'){
+    if(wrap) wrap.style.display = '';
+    if(input && input.value === '') input.value = '0';
+    if(hint) hint.textContent = 'اكتب المبلغ الذي دفعه الآن. اكتب 0 إذا لم يدفع شيئًا، والباقي يسجل كدين.';
+  }else{
+    if(wrap) wrap.style.display = 'none';
+    if(input) input.value = '';
+    if(hint) hint.textContent = 'نقدًا = الفاتورة مدفوعة بالكامل.';
+  }
+}
+
+function getEditPaymentMode(){
+  const active = document.querySelector('#editPaymentChips .chip.active');
+  return active?.dataset.pay || 'cash';
 }
 
 async function saveInvoiceEditForm(invoiceId){
@@ -3982,11 +4008,17 @@ async function saveInvoiceEditForm(invoiceId){
   }
   const total = Math.round((itemsTotal - discountAmount + Number.EPSILON) * 100) / 100;
 
+  const editPaymentMode = getEditPaymentMode();
   const paidNowRaw = document.getElementById('edit-paid-now')?.value;
   const hasPaidNowInput = paidNowRaw !== undefined && String(paidNowRaw).trim() !== '';
-  let paidNowVal = hasPaidNowInput ? parseFloat(paidNowRaw) : (Number(inv.paidNow || 0));
-  if(isNaN(paidNowVal) || paidNowVal < 0) paidNowVal = 0;
-  if(paidNowVal > total) paidNowVal = total;
+  let paidNowVal;
+  if(editPaymentMode === 'cash'){
+    paidNowVal = total;
+  }else{
+    paidNowVal = hasPaidNowInput ? parseFloat(paidNowRaw) : Number(inv.paidNow || 0);
+    if(isNaN(paidNowVal) || paidNowVal < 0) paidNowVal = 0;
+    if(paidNowVal > total) paidNowVal = total;
+  }
   const newRemaining = Math.max(0, Math.round((total - paidNowVal + Number.EPSILON) * 100) / 100);
 
   // إذا أدخل المستخدم دفعًا صريحًا، أو أصبح هناك دين بعد التعديل، نحتاج اختيار زبون إن لم تكن الفاتورة مرتبطة.
@@ -4000,7 +4032,7 @@ async function saveInvoiceEditForm(invoiceId){
   const oldRemaining = Number(inv.remaining || 0);
   const oldTotal = Number(inv.total || 0);
   const excess = Math.round((oldTotal - total + Number.EPSILON) * 100) / 100;
-  if(oldRemaining <= 0 && excess > 0 && !hasPaidNowInput){
+  if(oldRemaining <= 0 && excess > 0 && editPaymentMode === 'cash'){
     pendingInvoiceEdit = { invoiceId, newItems, total, cost, oldTotal, excess, discountAmount, rawTotal: itemsTotal, paidNowOverride: paidNowVal, stockDeltas };
     openInvoiceEditExcessPrompt();
     return;
@@ -4168,12 +4200,15 @@ async function commitInvoiceEdit(invoiceId, newItems, total, cost, skipDeltaTx, 
     saveOps.push(saveProducts());
   }
 
-  // المسار العادي (لا يوجد فرق زائد مبهم): نحسب فرق الدين كالمعتاد. عند التعامل مع الفرق
-  // الزائد عبر نافذة الاختيار أعلاه (استرجاع/رصيد) نتخطى هذا الحساب لأنه عُولج صراحةً هناك.
+  // نحسب حالة الدفع الجديدة دائمًا، حتى في مسار معالجة الفرق الزائد.
+  const oldRemaining = Number(inv.remaining || 0);
+  const paidNow = (opts.paidNowOverride != null) ? Number(opts.paidNowOverride || 0) : (inv.remaining > 0 ? Number(inv.paidNow || 0) : Number(inv.total || 0));
+  const safePaidNow = Math.min(Math.max(0, paidNow), total);
+  const newRemaining = Math.max(0, Math.round((total - safePaidNow + Number.EPSILON) * 100) / 100);
+
+  // المسار العادي: نحسب فرق الدين كالمعتاد. عند التعامل مع الفرق
+  // الزائد عبر نافذة الاختيار أعلاه (استرجاع/رصيد) نتخطى هذا الحساب لأنه عولج صراحةً هناك.
   if(!skipDeltaTx){
-    const oldRemaining = inv.remaining || 0;
-    const paidNow = (opts.paidNowOverride != null) ? opts.paidNowOverride : (inv.paidNow || 0);
-    const newRemaining = Math.max(0, Math.round((total - paidNow + Number.EPSILON) * 100) / 100);
     const deltaRemaining = Math.round((oldRemaining - newRemaining + Number.EPSILON) * 100) / 100;
     if(deltaRemaining !== 0 && inv.customerId){
       const c = customers.find(x=>x.id===inv.customerId);
@@ -4189,9 +4224,12 @@ async function commitInvoiceEdit(invoiceId, newItems, total, cost, skipDeltaTx, 
         saveOps.push(saveCustomers(), saveCustomerTx());
       }
     }
-    inv.remaining = newRemaining;
-    if(opts.paidNowOverride != null) inv.paidNow = paidNow;
   }
+
+  // حالة الدفع الجديدة هي المرجع الوحيد للنقد/الدين في الفاتورة.
+  inv.remaining = newRemaining;
+  inv.paidNow = safePaidNow;
+  inv.paymentMethod = newRemaining > 0 ? 'credit' : 'cash';
 
   inv.items = newItems;
   inv.total = total;
@@ -6782,7 +6820,7 @@ function computePeriodStats(start, end){
   const profit = inv.reduce((a,i)=>a+i.profit,0);
   const expensesTotal = exp.reduce((a,e)=>a+e.amount,0);
   const netProfit = profit - expensesTotal;
-  const cashFromInvoices = inv.reduce((a,i)=> a + (i.paymentMethod==='cash' ? i.total : (i.paidNow||0)), 0);
+  const cashFromInvoices = inv.reduce((a,i)=> a + invoiceCashCollected(i), 0);
   // تحصيل ديون سابقة (دفعات على فواتير قديمة تمت خلال هذه الفترة) هو أيضًا نقد دخل جيبك،
   // فيُضاف إلى النقد المحصّل حتى لو كانت الفاتورة الأصلية من يوم آخر.
   const debtPaymentsCollected = customerTx.filter(t=>{
@@ -6821,6 +6859,13 @@ function statRow(label, curVal, prevVal, isMoney, hideIfProfit){
 
 function statsEscape(v){
   return escapeHtml(String(v ?? ''));
+}
+
+function invoiceCashCollected(inv){
+  if(!inv) return 0;
+  const paid = Number(inv.paidNow);
+  if(Number.isFinite(paid)) return Math.max(0, paid);
+  return Number(inv.remaining || 0) > 0 ? 0 : Number(inv.total || 0);
 }
 
 function getStatsFilteredInvoices(period, category, customerId){
@@ -6990,7 +7035,7 @@ function openDailyClosing(){
   const todaysInvoices = invoices.filter(i=>localDateKey(i.date)===today);
   const salesTotal = todaysInvoices.reduce((a,i)=>a+i.total,0);
   const profitTotal = todaysInvoices.reduce((a,i)=>a+i.profit,0);
-  const cashFromInvoicesToday = todaysInvoices.reduce((a,i)=> a + (i.paymentMethod==='cash' ? i.total : (i.paidNow||0)), 0);
+  const cashFromInvoicesToday = todaysInvoices.reduce((a,i)=> a + invoiceCashCollected(i), 0);
   // تحصيل ديون قديمة اليوم (سداد من عميل على فاتورة من يوم سابق) هو نقد دخل جيبك اليوم فعليًا،
   // لذلك يُحسب ضمن "نقد محصّل" حتى لو الفاتورة الأصلية ليست من اليوم.
   const debtPaymentsToday = customerTx.filter(t=> t.type==='payment' && localDateKey(t.date)===today)
