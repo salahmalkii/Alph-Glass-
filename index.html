@@ -2714,9 +2714,10 @@ function renderPosDraftSelectedList(){
         <div class="row">
           <div class="row-main"><div class="row-name">${escapeHtml(name)} ${glassTypeBadge(p)}</div></div>
           <div class="stepper">
-            <button onclick="changeCart('${id}', -cartStepForProduct(p))">−</button>
-            <span class="mono" style="font-weight:700;min-width:24px;text-align:center;">${cart[id]}</span>
-            <button onclick="changeCart('${id}', cartStepForProduct(p))" ${cart[id]>=p.qty?'disabled':''}>+</button>
+            <button onclick="changeCart('${id}', ${-cartStepForProduct(p)})">−</button>
+            <input type="number" inputmode="numeric" class="mono cart-qty-input" value="${cart[id]}" min="0" max="${p.qty}"
+              onchange="setCartQty('${id}', this.value)" onclick="this.select()">
+            <button onclick="changeCart('${id}', ${cartStepForProduct(p)})" ${cart[id]>=p.qty?'disabled':''}>+</button>
           </div>
         </div>`;
       }).join('')}
@@ -2896,10 +2897,10 @@ function renderPos(){
         ${inCart > 0 && grp ? `<div class="row-sub" style="color:var(--accent-b);cursor:pointer;margin-top:2px;" onclick="event.stopPropagation();openDisplayNamePicker('${p.id}')">🏷 ${displayName ? 'يُباع باسم: ' + escapeHtml(displayName) : 'بيعه باسم موديل آخر متوافق؟'}</div>` : ''}
       </div>
       <div class="stepper">
-        <button onclick="event.stopPropagation();changeCart('${p.id}', -cartStepForProduct(p))" ${inCart<=0?'disabled':''}>−</button>
+        <button onclick="event.stopPropagation();changeCart('${p.id}', ${-cartStepForProduct(p)})" ${inCart<=0?'disabled':''}>−</button>
         <input type="number" inputmode="numeric" class="mono cart-qty-input" value="${inCart}" min="0" max="${p.qty}"
           onchange="setCartQty('${p.id}', this.value, ${matchedTermArg})" onclick="event.stopPropagation();this.select()">
-        <button onclick="event.stopPropagation();changeCart('${p.id}', cartStepForProduct(p), ${matchedTermArg})" ${outOfStock || inCart>=p.qty ? 'disabled':''}>+</button>
+        <button onclick="event.stopPropagation();changeCart('${p.id}', ${cartStepForProduct(p)}, ${matchedTermArg})" ${outOfStock || inCart>=p.qty ? 'disabled':''}>+</button>
       </div>
     </div>`;
   }).join('');
