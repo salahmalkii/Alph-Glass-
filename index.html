@@ -2714,10 +2714,9 @@ function renderPosDraftSelectedList(){
         <div class="row">
           <div class="row-main"><div class="row-name">${escapeHtml(name)} ${glassTypeBadge(p)}</div></div>
           <div class="stepper">
-            <button onclick="changeCart('${id}', ${-cartStepForProduct(p)})">−</button>
-            <input type="number" inputmode="numeric" class="mono cart-qty-input" value="${cart[id]}" min="0" max="${p.qty}"
-              onchange="setCartQty('${id}', this.value)" onclick="this.select()">
-            <button onclick="changeCart('${id}', ${cartStepForProduct(p)})" ${cart[id]>=p.qty?'disabled':''}>+</button>
+            <button onclick="changeCart('${id}', -cartStepForProduct(p))">−</button>
+            <span class="mono" style="font-weight:700;min-width:24px;text-align:center;">${cart[id]}</span>
+            <button onclick="changeCart('${id}', cartStepForProduct(p))" ${cart[id]>=p.qty?'disabled':''}>+</button>
           </div>
         </div>`;
       }).join('')}
@@ -2897,10 +2896,10 @@ function renderPos(){
         ${inCart > 0 && grp ? `<div class="row-sub" style="color:var(--accent-b);cursor:pointer;margin-top:2px;" onclick="event.stopPropagation();openDisplayNamePicker('${p.id}')">🏷 ${displayName ? 'يُباع باسم: ' + escapeHtml(displayName) : 'بيعه باسم موديل آخر متوافق؟'}</div>` : ''}
       </div>
       <div class="stepper">
-        <button onclick="event.stopPropagation();changeCart('${p.id}', ${-cartStepForProduct(p)})" ${inCart<=0?'disabled':''}>−</button>
+        <button onclick="event.stopPropagation();changeCart('${p.id}', -cartStepForProduct(p))" ${inCart<=0?'disabled':''}>−</button>
         <input type="number" inputmode="numeric" class="mono cart-qty-input" value="${inCart}" min="0" max="${p.qty}"
           onchange="setCartQty('${p.id}', this.value, ${matchedTermArg})" onclick="event.stopPropagation();this.select()">
-        <button onclick="event.stopPropagation();changeCart('${p.id}', ${cartStepForProduct(p)}, ${matchedTermArg})" ${outOfStock || inCart>=p.qty ? 'disabled':''}>+</button>
+        <button onclick="event.stopPropagation();changeCart('${p.id}', cartStepForProduct(p), ${matchedTermArg})" ${outOfStock || inCart>=p.qty ? 'disabled':''}>+</button>
       </div>
     </div>`;
   }).join('');
@@ -6825,10 +6824,10 @@ function computePeriodStats(start, end){
   // تحصيل ديون سابقة (دفعات على فواتير قديمة تمت خلال هذه الفترة) هو أيضًا نقد دخل جيبك،
   // فيُضاف إلى النقد المحصّل حتى لو كانت الفاتورة الأصلية من يوم آخر.
   const debtPaymentsCollected = customerTx.filter(t=>{
-    if(t.type!=='payment') return false;
+    if(!isRealDebtCollection(t)) return false;
     const d = new Date(t.date);
     return d>=start && d<end;
-  }).reduce((a,t)=>a+(t.amount||0),0);
+  }).reduce((a,t)=>a+Math.max(0,Number(t.amount||0)),0);
   const cashCollected = cashFromInvoices + debtPaymentsCollected;
   const newDebt = inv.reduce((a,i)=> a + (i.remaining||0), 0);
   const count = inv.length;
@@ -6864,9 +6863,22 @@ function statsEscape(v){
 
 function invoiceCashCollected(inv){
   if(!inv) return 0;
+  const total = Math.max(0, Number(inv.total || 0));
+  const remaining = Math.max(0, Number(inv.remaining || 0));
+  const calculated = remaining > 0 ? Math.max(0, total - remaining) : total;
   const paid = Number(inv.paidNow);
-  if(Number.isFinite(paid)) return Math.max(0, paid);
-  return Number(inv.remaining || 0) > 0 ? 0 : Number(inv.total || 0);
+  if(Number.isFinite(paid) && paid >= 0 && paid <= total && Math.abs(paid - calculated) < 0.01) return paid;
+  return calculated;
+}
+
+function isRealDebtCollection(tx){
+  if(!tx || tx.type !== 'payment') return false;
+  const note = String(tx.note || '').trim();
+  // دفعات ناتجة عن تعديل/حذف فاتورة هي حركات محاسبية وليست تحصيلًا نقديًا من الزبون.
+  if(/^تعديل فاتورة #/.test(note)) return false;
+  if(/^حذف فاتورة #/.test(note)) return false;
+  if(/^رصيد له من تعديل فاتورة #/.test(note)) return false;
+  return true;
 }
 
 function getStatsFilteredInvoices(period, category, customerId){
@@ -7030,87 +7042,59 @@ function openMonthComparison(period, selectedDate){
   },30);
 }
 
-function openDailyClosing(){
+let dailyClosingSelectedDate = todayStr();
+
+function shiftDailyClosingDate(days){
+  const base = statsLocalDate(dailyClosingSelectedDate || todayStr());
+  base.setDate(base.getDate() + Number(days || 0));
+  const next = localDateKey(base);
+  dailyClosingSelectedDate = next > todayStr() ? todayStr() : next;
+  openDailyClosing(dailyClosingSelectedDate);
+}
+
+function openDailyClosing(selectedDate){
   const sheet = document.getElementById('sheetContent');
   const today = todayStr();
-  const todaysInvoices = invoices.filter(i=>localDateKey(i.date)===today);
-  const salesTotal = todaysInvoices.reduce((a,i)=>a+i.total,0);
-  const profitTotal = todaysInvoices.reduce((a,i)=>a+i.profit,0);
-  const cashFromInvoicesToday = todaysInvoices.reduce((a,i)=> a + invoiceCashCollected(i), 0);
-  // تحصيل ديون قديمة اليوم (سداد من عميل على فاتورة من يوم سابق) هو نقد دخل جيبك اليوم فعليًا،
-  // لذلك يُحسب ضمن "نقد محصّل" حتى لو الفاتورة الأصلية ليست من اليوم.
-  const debtPaymentsToday = customerTx.filter(t=> t.type==='payment' && localDateKey(t.date)===today)
-    .reduce((a,t)=>a+(t.amount||0),0);
+  const requested = selectedDate || dailyClosingSelectedDate || today;
+  dailyClosingSelectedDate = requested > today ? today : requested;
+  const day = dailyClosingSelectedDate;
+  const dayDate = statsLocalDate(day);
+  const dayLabel = dayDate.toLocaleDateString('ar-DZ', {year:'numeric', month:'numeric', day:'numeric'});
+  const todaysInvoices = invoices.filter(i=>localDateKey(i.date)===day);
+  const salesTotal = todaysInvoices.reduce((a,i)=>a+Number(i.total||0),0);
+  const profitTotal = todaysInvoices.reduce((a,i)=>a+Number(i.profit||0),0);
+  const cashFromInvoicesToday = todaysInvoices.reduce((a,i)=>a + invoiceCashCollected(i),0);
+  const debtPaymentsToday = customerTx.filter(t=>isRealDebtCollection(t) && localDateKey(t.date)===day)
+    .reduce((a,t)=>a+Math.max(0,Number(t.amount||0)),0);
   const cashCollected = cashFromInvoicesToday + debtPaymentsToday;
-  const newDebtToday = todaysInvoices.reduce((a,i)=> a + (i.remaining||0), 0);
-  const expensesToday = expenses.filter(e=>localDateKey(e.date)===today).reduce((a,e)=>a+e.amount,0);
+  const newDebtToday = todaysInvoices.reduce((a,i)=>a+Math.max(0,Number(i.remaining||0)),0);
+  const expensesToday = expenses.filter(e=>localDateKey(e.date)===day).reduce((a,e)=>a+Number(e.amount||0),0);
   const netCash = cashCollected - expensesToday;
-
   const itemStats = {};
   todaysInvoices.forEach(inv=>{
-    inv.items.forEach(it=>{
-      if(!itemStats[it.name]) itemStats[it.name] = { qty: 0, profit: 0 };
-      const unitCost = it.buyPrice || 0;
-      const unitProfit = it.sellPrice - unitCost;
-      itemStats[it.name].qty += it.qty;
-      itemStats[it.name].profit += unitProfit * it.qty;
+    (inv.items||[]).forEach(it=>{
+      if(!itemStats[it.name]) itemStats[it.name] = {qty:0,profit:0};
+      const unitCost=Number(it.buyPrice||0), unitProfit=Number(it.sellPrice||0)-unitCost;
+      itemStats[it.name].qty += Number(it.qty||0);
+      itemStats[it.name].profit += unitProfit*Number(it.qty||0);
     });
   });
-  const itemStatsList = Object.entries(itemStats).sort((a,b)=> b[1].qty - a[1].qty);
-
-  sheet.innerHTML = `
-    <div class="sheet-head">
-      <h3>ملخص إغلاق اليوم</h3>
-      <button class="icon-btn" onclick="closeOverlay()">✕</button>
-    </div>
-    <div class="row-sub" style="margin-bottom:14px;">${new Date().toLocaleDateString('ar')} — ${todaysInvoices.length} فاتورة</div>
-    <div class="stat-grid">
-      <div class="stat-card">
-        <div class="v mono">${plainNum(salesTotal)}</div>
-        <div class="l">إجمالي المبيعات</div>
-      </div>
-      <div class="stat-card profit">
-        <div class="v mono">${settings.hideProfit ? '•••' : plainNum(profitTotal)}</div>
-        <div class="l">الربح</div>
+  const itemStatsList=Object.entries(itemStats).sort((a,b)=>b[1].qty-a[1].qty);
+  sheet.innerHTML=`
+    <div class="sheet-head"><h3>ملخص إغلاق اليوم</h3><button class="icon-btn" onclick="closeOverlay()">✕</button></div>
+    <div class="stats-date-picker" style="margin-bottom:14px;">
+      <label>📅 اختر يوم الإغلاق</label>
+      <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;">
+        <button type="button" class="chip" onclick="shiftDailyClosingDate(-1)">‹ اليوم السابق</button>
+        <input type="date" id="dailyClosingSelectedDate" value="${day}" max="${today}" onchange="openDailyClosing(this.value)" style="flex:1;min-width:160px;">
+        <button type="button" class="chip" ${day>=today?'disabled':''} onclick="shiftDailyClosingDate(1)">اليوم التالي ›</button>
       </div>
     </div>
-    <div class="stat-grid">
-      <div class="stat-card">
-        <div class="v mono" style="color:var(--accent-b);">${plainNum(cashCollected)}</div>
-        <div class="l">نقد محصّل</div>
-        ${debtPaymentsToday > 0 ? `<div class="row-sub" style="margin-top:4px;font-size:11px;">منها ${plainNum(debtPaymentsToday)} تحصيل ديون</div>` : ''}
-      </div>
-      <div class="stat-card">
-        <div class="v mono" style="color:var(--alert);">${plainNum(newDebtToday)}</div>
-        <div class="l">دين جديد اليوم</div>
-      </div>
-    </div>
-    <div class="stat-grid">
-      <div class="stat-card">
-        <div class="v mono" style="color:var(--alert);">${plainNum(expensesToday)}</div>
-        <div class="l">مصاريف اليوم</div>
-      </div>
-      <div class="stat-card profit">
-        <div class="v mono">${plainNum(netCash)}</div>
-        <div class="l">صافي النقد بجيبك</div>
-      </div>
-    </div>
-    ${itemStatsList.length > 0 ? `
-    <div class="section-title"><span>تفصيل الأرباح حسب الصنف</span></div>
-    <div class="ledger">
-      ${itemStatsList.map(([name, s])=>{
-        const perUnit = s.qty > 0 ? s.profit / s.qty : 0;
-        return `
-        <div class="row">
-          <div class="row-main">
-            <div class="row-name">${escapeHtml(name)}</div>
-            <div class="row-sub">${s.qty} قطعة${settings.hideProfit ? '' : ' · ربح القطعة: ' + plainNum(perUnit) + ' ' + settings.currency}</div>
-          </div>
-          ${settings.hideProfit ? '' : `<div class="mono" style="font-weight:700;color:var(--profit);">${plainNum(s.profit)}</div>`}
-        </div>`;
-      }).join('')}
-    </div>
-    ` : ''}
+    <div class="row-sub" style="margin-bottom:14px;">${dayLabel} — ${todaysInvoices.length} فاتورة</div>
+    <div class="stat-grid"><div class="stat-card"><div class="v mono">${plainNum(salesTotal)}</div><div class="l">إجمالي المبيعات</div></div><div class="stat-card profit"><div class="v mono">${settings.hideProfit?'•••':plainNum(profitTotal)}</div><div class="l">الربح</div></div></div>
+    <div class="stat-grid"><div class="stat-card"><div class="v mono" style="color:var(--accent-b);">${plainNum(cashCollected)}</div><div class="l">نقد محصّل</div><div class="row-sub" style="margin-top:4px;font-size:11px;">من الفواتير: ${plainNum(cashFromInvoicesToday)} · تحصيل ديون: ${plainNum(debtPaymentsToday)}</div></div><div class="stat-card"><div class="v mono" style="color:var(--alert);">${plainNum(newDebtToday)}</div><div class="l">دين جديد اليوم</div></div></div>
+    <div class="stat-grid"><div class="stat-card"><div class="v mono" style="color:var(--alert);">${plainNum(expensesToday)}</div><div class="l">مصاريف اليوم</div></div><div class="stat-card profit"><div class="v mono">${plainNum(netCash)}</div><div class="l">صافي النقد بجيبك</div></div></div>
+    ${itemStatsList.length ? `<div class="section-title"><span>تفصيل الأرباح حسب الصنف</span></div><div class="ledger">${itemStatsList.map(([name,s])=>{const perUnit=s.qty>0?s.profit/s.qty:0;return `<div class="row"><div class="row-main"><div class="row-name">${escapeHtml(name)}</div><div class="row-sub">${s.qty} قطعة${settings.hideProfit?'':' · ربح القطعة: '+plainNum(perUnit)+' '+settings.currency}</div></div>${settings.hideProfit?'':`<div class="mono" style="font-weight:700;color:var(--profit);">${plainNum(s.profit)}</div>`}</div>`;}).join('')}</div>` : `<div class="empty" style="padding:24px;">لا توجد فواتير في هذا اليوم</div>`}
   `;
   openOverlay();
 }
