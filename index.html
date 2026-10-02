@@ -6944,14 +6944,55 @@ function allocateCustomerPayment(customerId, amount, paymentTx){
 }
 
 function debtCreatedOnDay(day){
-  return customerTx.filter(t=>t.type==='debt' && localDateKey(t.date)===day)
-    .reduce((a,t)=>a+Math.max(0,Number(t.amount||0)),0);
+  // الإغلاق يعرض الدين الذي بقي مستحقًا من ديون أُنشئت في نفس اليوم،
+  // وليس إجمالي الدين الذي أُنشئ ثم تم تسديده في نفس اليوم.
+  const debtTx = customerTx.filter(t=>t.type==='debt' && localDateKey(t.date)===day);
+  let total = 0;
+  for(const debt of debtTx){
+    let remaining = Math.max(0, Number(debt.amount||0));
+    if(debt.invoiceId){
+      // نطرح فقط الدفعات الحقيقية التي خُصصت لهذه الفاتورة حتى نهاية اليوم.
+      for(const payment of customerTx){
+        if(payment.type!=='payment' || localDateKey(payment.date)>day || !Array.isArray(payment.allocations)) continue;
+        for(const a of payment.allocations){
+          if(a.invoiceId===debt.invoiceId){
+            remaining = Math.max(0, remaining - Number(a.amount||0));
+          }
+        }
+      }
+    }
+    total += remaining;
+  }
+  return Math.round((total + Number.EPSILON) * 100) / 100;
 }
 
 function debtBalanceAtEndOfDay(day){
-  return customerTx
-    .filter(t=>localDateKey(t.date) <= day)
-    .reduce((a,t)=>a + (t.type==='debt' ? Number(t.amount||0) : -Number(t.amount||0)),0);
+  // رصيد الديون الحقيقي حتى نهاية اليوم: ديون ناقصة التسديدات الفعلية.
+  // هذا يعتمد على الحركات المسجلة، وليس على قيمة remaining الحالية بعد أيام لاحقة.
+  const byCustomer = {};
+  const txs = customerTx
+    .filter(t=>localDateKey(t.date)<=day)
+    .sort((a,b)=>new Date(a.date)-new Date(b.date));
+  for(const tx of txs){
+    const cid = tx.customerId;
+    if(!cid) continue;
+    if(!byCustomer[cid]) byCustomer[cid]=[];
+    if(tx.type==='debt') byCustomer[cid].push({amount:Math.max(0,Number(tx.amount||0)), date:tx.date});
+    else if(tx.type==='payment'){
+      let left=Math.max(0,Number(tx.amount||0));
+      const queue=byCustomer[cid];
+      for(const d of queue){
+        if(left<=0) break;
+        const applied=Math.min(d.amount,left);
+        d.amount-=applied;
+        left-=applied;
+      }
+      // أي دفعة زائدة لا تُنقص الدين إلى قيمة سالبة.
+    }
+  }
+  let total=0;
+  for(const queue of Object.values(byCustomer)) total += queue.reduce((a,d)=>a+d.amount,0);
+  return Math.round((total + Number.EPSILON) * 100) / 100;
 }
 
 function getStatsFilteredInvoices(period, category, customerId){
