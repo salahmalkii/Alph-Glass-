@@ -6353,6 +6353,9 @@ function openOverdueDebts(){
 /* ================= Month-over-Month Comparison ================= */
 let statsPeriod = 'month';
 let statsSelectedDate = todayStr();
+let statsSelectedMonth = todayStr().slice(0,7);
+let statsRangeStart = todayStr();
+let statsRangeEnd = todayStr();
 
 function statsLocalDate(ymd){
   const m=String(ymd||'').match(/^(\d{4})-(\d{2})-(\d{2})$/);
@@ -6376,6 +6379,22 @@ function getPeriodRanges(period, dateOverride){
     const labelDate = curStart.toLocaleDateString('ar-DZ',{weekday:'long',year:'numeric',month:'long',day:'numeric'});
     const prevDate = prevStart.toLocaleDateString('ar-DZ',{year:'numeric',month:'long',day:'numeric'});
     curLabel = labelDate; prevLabel = prevDate;
+  }else if(period === 'selectedMonth'){
+    const m=String(dateOverride || statsSelectedMonth || todayStr().slice(0,7));
+    const mm=m.match(/^(\d{4})-(\d{2})$/);
+    const y=mm?Number(mm[1]):now.getFullYear(), mo=mm?Number(mm[2])-1:now.getMonth();
+    curStart=new Date(y,mo,1); curEnd=new Date(y,mo+1,1);
+    prevStart=new Date(y,mo-1,1); prevEnd=new Date(y,mo,1);
+    curLabel=curStart.toLocaleDateString('ar-DZ',{year:'numeric',month:'long'});
+    prevLabel=prevStart.toLocaleDateString('ar-DZ',{year:'numeric',month:'long'});
+  }else if(period === 'custom'){
+    let a=statsLocalDate(statsRangeStart||todayStr()), b=statsLocalDate(statsRangeEnd||statsRangeStart||todayStr());
+    if(b<a){const t=a;a=b;b=t;}
+    curStart=a; curEnd=new Date(b.getTime()+24*60*60*1000);
+    const span=curEnd-curStart;
+    prevEnd=curStart; prevStart=new Date(curStart.getTime()-span);
+    curLabel=curStart.toLocaleDateString('ar-DZ',{year:'numeric',month:'short',day:'numeric'})+' → '+new Date(curEnd.getTime()-86400000).toLocaleDateString('ar-DZ',{year:'numeric',month:'short',day:'numeric'});
+    prevLabel='الفترة السابقة بنفس المدة';
   }else if(period === 'day'){
     curStart = startOfToday; curEnd = endOfToday;
     prevStart = new Date(curStart.getTime() - 24*60*60*1000); prevEnd = curStart;
@@ -6484,7 +6503,7 @@ function statsBuildSeries(period, category, customerId, metric){
   let count, step;
   if(period==='day' || period==='selectedDay'){ count=24; step=60*60*1000; }
   else if(period==='week'){ count=7; step=24*60*60*1000; }
-  else { count=Math.max(1,new Date(curStart.getFullYear(),curStart.getMonth()+1,0).getDate()); step=24*60*60*1000; }
+  else { count=Math.max(1,Math.ceil((curEnd-curStart)/(24*60*60*1000))); step=24*60*60*1000; }
   const labels=[], values=[];
   for(let n=0;n<count;n++){
     const a=new Date(curStart.getTime()+n*step);
@@ -6506,7 +6525,7 @@ function statsBuildSeries(period, category, customerId, metric){
     if(metric==='invoices') val=inv.length;
     else if(metric==='profit') val=inv.reduce((x,i)=>x+(i.profit||0),0);
     else val=inv.reduce((x,i)=>x+(i.total||0),0);
-    labels.push(period==='day' ? String(a.getHours()).padStart(2,'0')+':00' : String(a.getDate()).padStart(2,'0')+'/'+String(a.getMonth()+1).padStart(2,'0'));
+    labels.push((period==='day'||period==='selectedDay') ? String(a.getHours()).padStart(2,'0')+':00' : String(a.getDate()).padStart(2,'0')+'/'+String(a.getMonth()+1).padStart(2,'0'));
     values.push(val);
   }
   return {labels,values};
@@ -6560,8 +6579,10 @@ function statsChartMove(ev){
   tip.style.display='block'; tip.style.left=Math.min(Math.max(8,x-70),r.width-150)+'px'; tip.style.top=Math.max(4,canvas._statsPoints[best].y-42)+'px';
 }
 
-function openMonthComparison(period, selectedDate){
+function openMonthComparison(period, selectedDate, selectedEndDate){
   if(period === 'selectedDay') statsSelectedDate = selectedDate || statsSelectedDate || todayStr();
+  if(period === 'selectedMonth') statsSelectedMonth = selectedDate || statsSelectedMonth || todayStr().slice(0,7);
+  if(period === 'custom') { statsRangeStart = selectedDate || statsRangeStart || todayStr(); statsRangeEnd = selectedEndDate || statsRangeEnd || statsRangeStart; }
   statsPeriod = period || statsPeriod || 'month';
   const sheet=document.getElementById('sheetContent');
   const {curStart,curEnd,prevStart,prevEnd,curLabel,prevLabel}=getPeriodRanges(statsPeriod);
@@ -6585,6 +6606,8 @@ function openMonthComparison(period, selectedDate){
       <button class="chip ${statsPeriod==='day'?'active':''}" onclick="openMonthComparison('day')">اليوم</button>
       <button class="chip ${statsPeriod==='week'?'active':''}" onclick="openMonthComparison('week')">7 أيام</button>
       <button class="chip ${statsPeriod==='month'?'active':''}" onclick="openMonthComparison('month')">هذا الشهر</button>
+      <button class="chip ${statsPeriod==='selectedMonth'?'active':''}" onclick="openMonthComparison('selectedMonth',document.getElementById('statsSelectedMonth')?.value || statsSelectedMonth)">شهر محدد</button>
+      <button class="chip ${statsPeriod==='custom'?'active':''}" onclick="openMonthComparison('custom',document.getElementById('statsRangeStart')?.value || todayStr(),document.getElementById('statsRangeEnd')?.value || todayStr())">فترة مخصصة</button>
     </div>
     <div class="stats-date-picker">
       <label>📅 اختر اليوم الذي تريد إحصائياته</label>
@@ -6593,6 +6616,22 @@ function openMonthComparison(period, selectedDate){
         <button class="chip ${statsPeriod==='selectedDay'?'active':''}" onclick="openMonthComparison('selectedDay',document.getElementById('statsSelectedDate')?.value || todayStr())">عرض اليوم</button>
       </div>
       <div class="row-sub" style="margin-top:6px;">يمكنك اختيار أي تاريخ محفوظ في بيانات المبيعات والمصاريف، وستظهر المقارنة مع اليوم السابق.</div>
+    </div>
+    <div class="stats-date-picker">
+      <label>🗓️ اختر شهرًا محددًا</label>
+      <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;">
+        <input type="month" id="statsSelectedMonth" value="${statsEscape(statsSelectedMonth || todayStr().slice(0,7))}" style="flex:1;min-width:180px;">
+        <button class="chip ${statsPeriod==='selectedMonth'?'active':''}" onclick="openMonthComparison('selectedMonth',document.getElementById('statsSelectedMonth')?.value || statsSelectedMonth)">عرض الشهر</button>
+      </div>
+    </div>
+    <div class="stats-date-picker">
+      <label>↔️ اختر فترة من يوم إلى يوم</label>
+      <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;">
+        <input type="date" id="statsRangeStart" value="${statsEscape(statsRangeStart || todayStr())}" style="flex:1;min-width:140px;">
+        <span>إلى</span>
+        <input type="date" id="statsRangeEnd" value="${statsEscape(statsRangeEnd || todayStr())}" style="flex:1;min-width:140px;">
+        <button class="chip ${statsPeriod==='custom'?'active':''}" onclick="openMonthComparison('custom',document.getElementById('statsRangeStart')?.value || todayStr(),document.getElementById('statsRangeEnd')?.value || todayStr())">عرض الفترة</button>
+      </div>
     </div>
     <div class="stats-filters">
       <select id="statsMetric" onchange="statsDrawChart()"><option value="sales">المبيعات</option><option value="profit">الربح</option><option value="invoices">عدد الفواتير</option></select>
