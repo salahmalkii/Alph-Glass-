@@ -6860,6 +6860,10 @@ function openExpenseForm(){
       <input type="number" inputmode="decimal" id="ex-amount" placeholder="0.00">
     </div>
     <div class="field">
+      <label>تاريخ المصروف</label>
+      <input type="date" id="ex-date" value="${todayStr()}">
+    </div>
+    <div class="field">
       <label>الصنف</label>
       <select id="ex-category">
         ${getExpenseCategories().map(c=>`<option value="${escapeHtml(c)}">${escapeHtml(c)}</option>`).join('')}
@@ -6880,9 +6884,13 @@ async function saveExpenseForm(){
   const amount = parseFloat(document.getElementById('ex-amount').value);
   const category = document.getElementById('ex-category').value;
   const note = document.getElementById('ex-note').value.trim();
+  const dateValue = document.getElementById('ex-date')?.value || todayStr();
   if(isNaN(amount) || amount <= 0){ showToast('أدخل مبلغًا صحيحًا'); return; }
+  if(!/^\d{4}-\d{2}-\d{2}$/.test(dateValue)){ showToast('اختر تاريخًا صحيحًا'); return; }
 
-  expenses.unshift({ id: uid(), amount, category, note, date: new Date().toISOString() });
+  const now = new Date();
+  const localDate = new Date(Number(dateValue.slice(0,4)), Number(dateValue.slice(5,7))-1, Number(dateValue.slice(8,10)), now.getHours(), now.getMinutes(), now.getSeconds());
+  expenses.unshift({ id: uid(), amount, category, note, date: localDate.toISOString() });
   await saveExpenses();
   renderProfits();
   openExpenses();
