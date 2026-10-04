@@ -1191,6 +1191,18 @@ function normalizeGlassType(value){
   return v;
 }
 
+function saleGlassTypeBadge(p){
+  const key = normalizeGlassType(p?.glassType || '');
+  if(!key || !glassTypeLabel[key]) return '';
+  const styles = {
+    esd: 'background:rgba(59,130,246,.18);color:#60A5FA;border-color:rgba(96,165,250,.35);',
+    uv: 'background:rgba(168,85,247,.18);color:#C084FC;border-color:rgba(192,132,252,.35);',
+    bordure: 'background:rgba(16,185,129,.18);color:#34D399;border-color:rgba(52,211,153,.35);',
+    fume: 'background:rgba(148,163,184,.18);color:#CBD5E1;border-color:rgba(203,213,225,.35);'
+  };
+  return `<span class="cat-badge glass" style="${styles[key] || ''}margin-right:6px;font-weight:800;">${escapeHtml(glassTypeLabel[key])}</span>`;
+}
+
 function setInvFilter(cat){
   invFilter = cat;
   document.querySelectorAll('#invChips .chip').forEach(c=>c.classList.toggle('active', c.dataset.cat===cat));
@@ -2942,8 +2954,8 @@ function renderPos(){
     const matchedTermArg = matchedTerm ? `'${escapeHtml(matchedTerm).replace(/'/g,"\\'")}'` : (smartMatched ? `'${escapeHtml(q).replace(/'/g,"\\'")}'` : 'null');
     return `
     <div class="pos-item">
-      <div class="row-main" ${orderDraftMode ? `style="cursor:pointer;" onclick="quickAddAndClearSearch('${p.id}', ${matchedTermArg})"` : ''}>
-        <div class="row-name">${escapeHtml(p.name)}</div>
+      <div class="row-main" style="cursor:pointer;" onclick="${orderDraftMode ? `quickAddAndClearSearch('${p.id}', ${matchedTermArg})` : `quickAddToCart('${p.id}')`}">
+        <div class="row-name">${escapeHtml(p.name)} ${saleGlassTypeBadge(p)}</div>
         <div class="row-sub mono">${plainNum(p.sellPrice)} ${settings.currency} · متوفر ${p.qty}</div>
         ${matchedTerm ? `<div class="row-sub" style="color:var(--accent-b);margin-top:2px;">🧩 متوافق مع "${escapeHtml(matchedTerm)}" اللي بحثت عنه</div>` : ''}
         ${inCart > 0 && grp ? `<div class="row-sub" style="color:var(--accent-b);cursor:pointer;margin-top:2px;" onclick="event.stopPropagation();openDisplayNamePicker('${p.id}')">🏷 ${displayName ? 'يُباع باسم: ' + escapeHtml(displayName) : 'بيعه باسم موديل آخر متوافق؟'}</div>` : ''}
