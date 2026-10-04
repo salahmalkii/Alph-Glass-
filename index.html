@@ -1099,6 +1099,14 @@ function getExpenseCategories(){
 let orderDraftMode = false; // true while building a draft order (not an immediate sale)
 let editingDraftOrderId = null; // set while fulfilling an existing draft order
 const CART_STEP = 10;
+
+// كمية البيع الافتراضية حسب نوع الزجاج: ESD = 10، SANS BORDURE = 5.
+// طلبات التحضير تبقى مستقلة وتستخدم خطوة 1 كما هي.
+function getSaleStep(product){
+  const type = normalizeGlassType(product?.glassType || '');
+  return type === 'bordure' ? 5 : 10;
+}
+
 const LOW_STOCK_THRESHOLD = 10;
 function getLowStockThreshold(){ const v=parseInt(localStorage.getItem(STORAGE_PREFIX+'lowStockThreshold')); return Number.isFinite(v)&&v>=0?v:LOW_STOCK_THRESHOLD; }
 
@@ -2759,9 +2767,9 @@ function renderPosDraftSelectedList(){
         <div class="row">
           <div class="row-main"><div class="row-name">${escapeHtml(name)}</div></div>
           <div class="stepper">
-            <button onclick="changeCart('${id}', -${orderDraftMode ? 1 : CART_STEP})">−</button>
+            <button onclick="changeCart('${id}', -${orderDraftMode ? 1 : getSaleStep(p)})">−</button>
             <span class="mono" style="font-weight:700;min-width:24px;text-align:center;">${cart[id]}</span>
-            <button onclick="changeCart('${id}', ${orderDraftMode ? 1 : CART_STEP})" ${cart[id]>=p.qty?'disabled':''}>+</button>
+            <button onclick="changeCart('${id}', ${orderDraftMode ? 1 : getSaleStep(p)})" ${cart[id]>=p.qty?'disabled':''}>+</button>
           </div>
         </div>`;
       }).join('')}
@@ -2834,7 +2842,7 @@ function quickAddToCart(productId){
   if(!p || p.qty <= 0){ showToast('غير متوفر بالمخزون'); return; }
   const cur = cart[productId] || 0;
   if(cur >= p.qty){ showToast('الكمية غير متوفرة'); return; }
-  cart[productId] = Math.min(cur + (orderDraftMode ? 1 : CART_STEP), p.qty);
+  cart[productId] = Math.min(cur + (orderDraftMode ? 1 : getSaleStep(p)), p.qty);
   renderPos();
 }
 
@@ -2843,7 +2851,7 @@ function quickAddAndClearSearch(productId, matchedTerm){
   if(!p || p.qty <= 0){ showToast('غير متوفر بالمخزون'); return; }
   const cur = cart[productId] || 0;
   if(cur >= p.qty){ showToast('الكمية غير متوفرة'); return; }
-  cart[productId] = Math.min(cur + (orderDraftMode ? 1 : CART_STEP), p.qty);
+  cart[productId] = Math.min(cur + (orderDraftMode ? 1 : getSaleStep(p)), p.qty);
   if(matchedTerm && !cartDisplayName[productId]) cartDisplayName[productId] = matchedTerm;
   const searchInput = document.getElementById('posSearch');
   if(searchInput) searchInput.value = '';
@@ -2941,10 +2949,10 @@ function renderPos(){
         ${inCart > 0 && grp ? `<div class="row-sub" style="color:var(--accent-b);cursor:pointer;margin-top:2px;" onclick="event.stopPropagation();openDisplayNamePicker('${p.id}')">🏷 ${displayName ? 'يُباع باسم: ' + escapeHtml(displayName) : 'بيعه باسم موديل آخر متوافق؟'}</div>` : ''}
       </div>
       <div class="stepper">
-        <button onclick="event.stopPropagation();changeCart('${p.id}', -${orderDraftMode ? 1 : CART_STEP})" ${inCart<=0?'disabled':''}>−</button>
+        <button onclick="event.stopPropagation();changeCart('${p.id}', -${orderDraftMode ? 1 : getSaleStep(p)})" ${inCart<=0?'disabled':''}>−</button>
         <input type="number" inputmode="numeric" class="mono cart-qty-input" value="${inCart}" min="0" max="${p.qty}"
           onchange="setCartQty('${p.id}', this.value, ${matchedTermArg})" onclick="event.stopPropagation();this.select()">
-        <button onclick="event.stopPropagation();changeCart('${p.id}', ${orderDraftMode ? 1 : CART_STEP}, ${matchedTermArg})" ${outOfStock || inCart>=p.qty ? 'disabled':''}>+</button>
+        <button onclick="event.stopPropagation();changeCart('${p.id}', ${orderDraftMode ? 1 : getSaleStep(p)}, ${matchedTermArg})" ${outOfStock || inCart>=p.qty ? 'disabled':''}>+</button>
       </div>
     </div>`;
   }).join('');
@@ -5498,7 +5506,7 @@ function useSmartCompat(productId, requestedModel){
   const p=products.find(x=>x.id===productId);
   if(!p || p.qty<=0){ showToast('المنتج لم يعد متوفراً'); return; }
   // مهم: نخصم من المنتج الموجود فعلياً، لكن اسم الفاتورة يبقى هو الموديل الذي طلبه الزبون.
-  cart[productId] = Math.min((cart[productId]||0) + CART_STEP, p.qty);
+  cart[productId] = Math.min((cart[productId]||0) + getSaleStep(p), p.qty);
   cartDisplayName[productId] = requestedModel;
   closeOverlay();
   switchScreen('sell');
