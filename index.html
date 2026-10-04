@@ -6785,13 +6785,13 @@ function openExpenses(){
   const todayTotal = expenses.filter(e=>localDateKey(e.date)===today).reduce((a,e)=>a+e.amount,0);
   const allTotal = expenses.reduce((a,e)=>a+e.amount,0);
   const sorted = [...expenses].sort((a,b)=> new Date(b.date)-new Date(a.date));
-  const filtered = expensesDateFilter ? sorted.filter(e=>String(e.date).slice(0,10)===expensesDateFilter) : sorted;
+  const filtered = expensesDateFilter ? sorted.filter(e=>localDateKey(e.date)===expensesDateFilter) : sorted;
 
   // إحصائيات المصاريف يوميًا: تجميع كل المصاريف حسب اليوم مع مجموع كل يوم، لعرض اتجاه الصرف عبر الأيام.
   const dayGroups = {};
   const dayOrder = [];
   filtered.forEach(e=>{
-    const key = String(e.date).slice(0,10);
+    const key = localDateKey(e.date);
     if(!dayGroups[key]){ dayGroups[key] = []; dayOrder.push(key); }
     dayGroups[key].push(e);
   });
