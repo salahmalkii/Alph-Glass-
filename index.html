@@ -1101,7 +1101,7 @@ let editingDraftOrderId = null; // set while fulfilling an existing draft order
 const CART_STEP = 10;
 
 // كمية البيع الافتراضية حسب نوع الزجاج: ESD = 10، SANS BORDURE = 5.
-// طلبات التحضير تبقى مستقلة وتستخدم خطوة 1 كما هي.
+// نفس قاعدة الكمية في البيع والتحضير: ESD/UV = 10، وSANS BORDURE = 5.
 function getSaleStep(product){
   const type = normalizeGlassType(product?.glassType || '');
   return type === 'bordure' ? 5 : 10;
@@ -2777,11 +2777,11 @@ function renderPosDraftSelectedList(){
         const name = cartDisplayName[id] || p.name;
         return `
         <div class="row">
-          <div class="row-main"><div class="row-name">${escapeHtml(name)}</div></div>
+          <div class="row-main"><div class="row-name">${escapeHtml(name)} ${saleGlassTypeBadge(p)}</div></div>
           <div class="stepper">
-            <button onclick="changeCart('${id}', -${orderDraftMode ? 1 : getSaleStep(p)})">−</button>
+            <button onclick="changeCart('${id}', -${getSaleStep(p)})">−</button>
             <span class="mono" style="font-weight:700;min-width:24px;text-align:center;">${cart[id]}</span>
-            <button onclick="changeCart('${id}', ${orderDraftMode ? 1 : getSaleStep(p)})" ${cart[id]>=p.qty?'disabled':''}>+</button>
+            <button onclick="changeCart('${id}', ${getSaleStep(p)})" ${cart[id]>=p.qty?'disabled':''}>+</button>
           </div>
         </div>`;
       }).join('')}
@@ -2854,7 +2854,7 @@ function quickAddToCart(productId){
   if(!p || p.qty <= 0){ showToast('غير متوفر بالمخزون'); return; }
   const cur = cart[productId] || 0;
   if(cur >= p.qty){ showToast('الكمية غير متوفرة'); return; }
-  cart[productId] = Math.min(cur + (orderDraftMode ? 1 : getSaleStep(p)), p.qty);
+  cart[productId] = Math.min(cur + getSaleStep(p), p.qty);
   renderPos();
 }
 
@@ -2863,7 +2863,7 @@ function quickAddAndClearSearch(productId, matchedTerm){
   if(!p || p.qty <= 0){ showToast('غير متوفر بالمخزون'); return; }
   const cur = cart[productId] || 0;
   if(cur >= p.qty){ showToast('الكمية غير متوفرة'); return; }
-  cart[productId] = Math.min(cur + (orderDraftMode ? 1 : getSaleStep(p)), p.qty);
+  cart[productId] = Math.min(cur + getSaleStep(p), p.qty);
   if(matchedTerm && !cartDisplayName[productId]) cartDisplayName[productId] = matchedTerm;
   const searchInput = document.getElementById('posSearch');
   if(searchInput) searchInput.value = '';
@@ -2961,10 +2961,10 @@ function renderPos(){
         ${inCart > 0 && grp ? `<div class="row-sub" style="color:var(--accent-b);cursor:pointer;margin-top:2px;" onclick="event.stopPropagation();openDisplayNamePicker('${p.id}')">🏷 ${displayName ? 'يُباع باسم: ' + escapeHtml(displayName) : 'بيعه باسم موديل آخر متوافق؟'}</div>` : ''}
       </div>
       <div class="stepper">
-        <button onclick="event.stopPropagation();changeCart('${p.id}', -${orderDraftMode ? 1 : getSaleStep(p)})" ${inCart<=0?'disabled':''}>−</button>
+        <button onclick="event.stopPropagation();changeCart('${p.id}', -${getSaleStep(p)})" ${inCart<=0?'disabled':''}>−</button>
         <input type="number" inputmode="numeric" class="mono cart-qty-input" value="${inCart}" min="0" max="${p.qty}"
           onchange="setCartQty('${p.id}', this.value, ${matchedTermArg})" onclick="event.stopPropagation();this.select()">
-        <button onclick="event.stopPropagation();changeCart('${p.id}', ${orderDraftMode ? 1 : getSaleStep(p)}, ${matchedTermArg})" ${outOfStock || inCart>=p.qty ? 'disabled':''}>+</button>
+        <button onclick="event.stopPropagation();changeCart('${p.id}', ${getSaleStep(p)}, ${matchedTermArg})" ${outOfStock || inCart>=p.qty ? 'disabled':''}>+</button>
       </div>
     </div>`;
   }).join('');
@@ -3948,9 +3948,10 @@ function addInvoiceEditProduct(productId){
   const st=getInvoiceEditState();
   const p=products.find(x=>x.id===productId);
   if(!st || !p) return;
+  const step=getSaleStep(p);
   const existing=st.items.find(it=>it.productId===p.id);
-  if(existing){ existing.qty=(Number(existing.qty)||0)+1; }
-  else st.items.push({name:p.name, productId:p.id, qty:1, sellPrice:p.sellPrice, buyPrice:p.buyPrice});
+  if(existing){ existing.qty=(Number(existing.qty)||0)+step; }
+  else st.items.push({name:p.name, productId:p.id, qty:step, sellPrice:p.sellPrice, buyPrice:p.buyPrice});
   renderInvoiceEditSheet(false);
   const inp=document.getElementById('invoice-edit-product-search');
   if(inp){ inp.value=''; filterInvoiceEditProducts(); }
@@ -3964,7 +3965,7 @@ function filterInvoiceEditProducts(){
   const matches=products.filter(p=>searchTextMatches(p.name,q)).slice(0,10);
   box.innerHTML=matches.length ? `<div class="ledger" style="margin-top:8px;">${matches.map(p=>`
     <div class="row" style="cursor:pointer;" onclick="addInvoiceEditProduct('${p.id}')">
-      <div class="row-main"><div class="row-name">${escapeHtml(p.name)}</div><div class="row-sub">المخزون: ${plainNum(p.qty)} · ${plainNum(p.sellPrice)} ${settings.currency}</div></div>
+      <div class="row-main"><div class="row-name">${escapeHtml(p.name)} ${saleGlassTypeBadge(p)}</div><div class="row-sub">المخزون: ${plainNum(p.qty)} · ${plainNum(p.sellPrice)} ${settings.currency}</div></div>
       <span class="qty-pill">+ إضافة</span>
     </div>`).join('')}</div>` : `<div class="row-sub" style="margin-top:8px;">لا يوجد صنف مطابق</div>`;
 }
@@ -4014,7 +4015,7 @@ function renderInvoiceEditSheet(focusSearch){
         const p=it.productId ? products.find(x=>x.id===it.productId) : null;
         const typeLabel=p?.glassType ? (glassTypeLabel[p.glassType]||p.glassType) : '';
         return `<div class="row" style="align-items:center;gap:7px;">
-          <div class="row-main" style="min-width:0;"><div class="row-name">${escapeHtml(it.name||p?.name||'صنف')}</div><div class="row-sub">${typeLabel ? typeLabel+' — ' : ''}السعر للوحدة</div></div>
+          <div class="row-main" style="min-width:0;"><div class="row-name">${escapeHtml(it.name||p?.name||'صنف')} ${p ? saleGlassTypeBadge(p) : ''}</div><div class="row-sub">${typeLabel ? typeLabel+' — ' : ''}السعر للوحدة</div></div>
           <input type="number" inputmode="numeric" min="0" value="${it.qty}" onchange="updateInvoiceEditQty(${idx},this.value)" style="width:58px;padding:8px 4px;text-align:center;border-radius:8px;border:1px solid var(--border-strong);background:var(--surface-soft);color:var(--text);">
           <input type="number" inputmode="decimal" min="0" step="0.01" value="${it.sellPrice}" onchange="updateInvoiceEditPrice(${idx},this.value)" style="width:82px;padding:8px 4px;text-align:center;border-radius:8px;border:1px solid var(--border-strong);background:var(--surface-soft);color:var(--text);">
           <button class="icon-btn" title="حذف الصنف" onclick="removeInvoiceEditItem(${idx})">🗑</button>
@@ -7102,7 +7103,7 @@ function renderDraftOrderAddResults(orderId){
   results.innerHTML = `<div class="ledger">${matches.map(p=>`
     <div class="row" style="cursor:pointer;" onclick="addProductToDraftOrder('${orderId}', '${p.id}')">
       <div class="row-main">
-        <div class="row-name">${escapeHtml(p.name)}</div>
+        <div class="row-name">${escapeHtml(p.name)} ${saleGlassTypeBadge(p)}</div>
         <div class="row-sub mono">${plainNum(p.sellPrice)} ${settings.currency} · متوفر ${p.qty}</div>
         ${doSmartMatchInfo[p.id] ? smartDimBadgeHtml(doSmartMatchInfo[p.id]) : ''}
       </div>
@@ -7114,11 +7115,12 @@ async function addProductToDraftOrder(orderId, productId){
   const order = draftOrders.find(x=>x.id===orderId);
   const p = products.find(x=>x.id===productId);
   if(!order || !p) return;
+  const step = getSaleStep(p);
   const existing = order.items.find(it=>it.productId===productId);
   if(existing){
-    existing.qty += CART_STEP;
+    existing.qty += step;
   }else{
-    order.items.push({ name: p.name, productId: p.id, qty: CART_STEP, sellPrice: p.sellPrice, buyPrice: p.buyPrice });
+    order.items.push({ name: p.name, productId: p.id, qty: step, sellPrice: p.sellPrice, buyPrice: p.buyPrice });
   }
   await saveDraftOrders();
   const searchInput = document.getElementById('doAddSearch');
