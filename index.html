@@ -924,6 +924,10 @@ nav.no-print{display:none!important;}
     </div>
     <div class="chip-row" id="posChips"></div>
     <div id="posList"></div>
+    <div class="row" style="gap:8px;margin:12px 0 8px;justify-content:flex-end;">
+      <button class="chip" type="button" onclick="navigatePosQty(-1)">↑ السابق</button>
+      <button class="chip active" type="button" onclick="navigatePosQty(1)">↓ المنتج التالي</button>
+    </div>
     <div id="posDraftSelectedList" style="padding-bottom:110px;"></div>
   </section>
 
@@ -1103,8 +1107,13 @@ const CART_STEP = 10;
 // كمية البيع الافتراضية حسب نوع الزجاج: ESD = 10، SANS BORDURE = 5.
 // نفس قاعدة الكمية في البيع والتحضير: ESD/UV = 10، وSANS BORDURE = 5.
 function getSaleStep(product){
-  const type = normalizeGlassType(product?.glassType || '');
-  return type === 'bordure' ? 5 : 10;
+  // ESD يبدأ بـ10، وUV وSANS BORDURE يبدأ كل منهما بـ5،
+  // أما البوشات وبقية الإكسسوارات فتبدأ بقطعة واحدة.
+  if(!product) return 1;
+  const type = normalizeGlassType(product.glassType || '');
+  if(type === 'esd') return 10;
+  if(type === 'uv' || type === 'bordure') return 5;
+  return 1;
 }
 
 const LOW_STOCK_THRESHOLD = 10;
@@ -1201,6 +1210,40 @@ function saleGlassTypeBadge(p){
     fume: 'background:rgba(148,163,184,.18);color:#CBD5E1;border-color:rgba(203,213,225,.35);'
   };
   return `<span class="cat-badge glass" style="${styles[key] || ''}margin-right:6px;font-weight:800;">${escapeHtml(glassTypeLabel[key])}</span>`;
+}
+
+// شارة موحدة لنوع المنتج: الزجاج حسب ESD/UV/SANS، وكل فئة إكسسوارات بلون مستقل.
+function saleProductKindBadge(p){
+  if(!p) return '';
+  const glassKey = normalizeGlassType(p.glassType || '');
+  if(glassKey && glassTypeLabel[glassKey]) return saleGlassTypeBadge(p);
+
+  const raw = String(p.category || '').trim();
+  const label = categoryLabel(p);
+  if(!label) return '';
+  const isGlass = ['glass','زجاج حماية'].includes(raw.toLowerCase());
+  const palette = [
+    ['#F59E0B','rgba(245,158,11,.17)','rgba(245,158,11,.35)'],
+    ['#38BDF8','rgba(56,189,248,.17)','rgba(56,189,248,.35)'],
+    ['#F472B6','rgba(244,114,182,.17)','rgba(244,114,182,.35)'],
+    ['#A78BFA','rgba(167,139,250,.17)','rgba(167,139,250,.35)'],
+    ['#FB923C','rgba(251,146,60,.17)','rgba(251,146,60,.35)'],
+    ['#2DD4BF','rgba(45,212,191,.17)','rgba(45,212,191,.35)'],
+    ['#E879F9','rgba(232,121,249,.17)','rgba(232,121,249,.35)'],
+    ['#A3E635','rgba(163,230,53,.17)','rgba(163,230,53,.35)']
+  ];
+  const known = {'بوشات':0,'كفرات':1,'شواحن':2,'كابلات':3,'سماعات':4,'إكسسوارات':5,'اخرى':6,'أخرى':6};
+  let idx = known[label];
+  if(idx === undefined){
+    let hash = 0;
+    for(let i=0;i<label.length;i++) hash = (hash * 31 + label.charCodeAt(i)) >>> 0;
+    idx = hash % palette.length;
+  }
+  const c = palette[idx];
+  const style = isGlass
+    ? 'background:rgba(59,130,246,.18);color:#60A5FA;border-color:rgba(96,165,250,.35);'
+    : `background:${c[1]};color:${c[0]};border-color:${c[2]};`;
+  return `<span class="cat-badge glass" style="${style}margin-right:6px;font-weight:800;">${escapeHtml(label)}</span>`;
 }
 
 function setInvFilter(cat){
@@ -2100,6 +2143,7 @@ function renderInventory(){
     list.innerHTML = `<div class="empty">لا توجد أصناف مطابقة</div>`;
     return;
   }
+  posQtyNavIndex = -1;
   list.innerHTML = filtered.map(p=>{
     const low = p.qty <= getLowStockThreshold();
     const catLbl = categoryLabel(p);
@@ -2778,33 +2822,32 @@ function addLastOrderToCart(customerId){
 function renderPosDraftSelectedList(){
   const el = document.getElementById('posDraftSelectedList');
   if(!el) return;
-  if(!orderDraftMode){ el.innerHTML = ''; return; }
   const ids = Object.keys(cart);
   if(ids.length === 0){
-    el.innerHTML = `<div class="row-sub" style="margin-bottom:10px;">لسا ما اخترت أي صنف</div>`;
+    el.innerHTML = orderDraftMode ? `<div class="row-sub" style="margin-bottom:10px;">لسا ما اخترت أي صنف</div>` : '';
     return;
   }
   el.innerHTML = `
-    <div class="row-sub" style="margin-bottom:6px;">الأصناف المختارة (${ids.length}):</div>
+    <div class="row-sub" style="margin-bottom:6px;">الأصناف المحددة (${ids.length}) — تعديل الكمية:</div>
     <div class="ledger" style="margin-bottom:14px;">
       ${ids.map(id=>{
         const p = products.find(x=>x.id===id);
         if(!p) return '';
         const name = cartDisplayName[id] || p.name;
+        const step = getSaleStep(p);
         return `
         <div class="row">
-          <div class="row-main"><div class="row-name">${escapeHtml(name)} ${saleGlassTypeBadge(p)}</div></div>
+          <div class="row-main"><div class="row-name">${escapeHtml(name)} ${saleProductKindBadge(p)}</div><div class="row-sub">المتوفر: ${plainNum(p.qty)}</div></div>
           <div class="stepper">
-            <button onclick="changeCart('${id}', -${getSaleStep(p)})">−</button>
-            <span class="mono" style="font-weight:700;min-width:24px;text-align:center;">${cart[id]}</span>
-            <button onclick="changeCart('${id}', ${getSaleStep(p)})" ${cart[id]>=p.qty?'disabled':''}>+</button>
+            <button onclick="changeCart('${id}', -${step})" ${cart[id]<=0?'disabled':''}>−</button>
+            <input type="number" inputmode="numeric" class="mono cart-qty-input" style="width:54px;min-width:54px;text-align:center;" value="${cart[id]}" min="1" max="${p.qty}" onchange="setCartQty('${id}', this.value, null)" onclick="this.select()">
+            <button onclick="changeCart('${id}', ${step})" ${cart[id]>=p.qty?'disabled':''}>+</button>
           </div>
         </div>`;
       }).join('')}
     </div>
   `;
 }
-
 function renderPosQuickAdd(){
   const el = document.getElementById('posQuickAdd');
   if(!el) return;
@@ -2887,6 +2930,19 @@ function quickAddAndClearSearch(productId, matchedTerm){
   if(searchInput) searchInput.focus();
 }
 
+
+let posQtyNavIndex = -1;
+function navigatePosQty(direction=1){
+  const inputs = Array.from(document.querySelectorAll('#posDraftSelectedList .cart-qty-input'));
+  if(!inputs.length){ showToast('أضف منتجًا إلى القائمة المحددة أولاً'); return; }
+  if(direction > 0) posQtyNavIndex = (posQtyNavIndex + 1) % inputs.length;
+  else posQtyNavIndex = (posQtyNavIndex - 1 + inputs.length) % inputs.length;
+  const target = inputs[posQtyNavIndex];
+  const row = target.closest('.pos-item');
+  if(row) row.scrollIntoView({behavior:'smooth', block:'center'});
+  target.focus({preventScroll:true});
+  target.select();
+}
 
 function renderPos(){
   renderPosCustomerBanner();
@@ -2971,7 +3027,7 @@ function renderPos(){
     return `
     <div class="pos-item">
       <div class="row-main" style="cursor:pointer;" onclick="${orderDraftMode ? `quickAddAndClearSearch('${p.id}', ${matchedTermArg})` : `quickAddToCart('${p.id}')`}">
-        <div class="row-name">${escapeHtml(p.name)} ${saleGlassTypeBadge(p)}</div>
+        <div class="row-name">${escapeHtml(p.name)} ${saleProductKindBadge(p)}</div>
         <div class="row-sub mono">${plainNum(p.sellPrice)} ${settings.currency} · متوفر ${p.qty}</div>
         ${matchedTerm ? `<div class="row-sub" style="color:var(--accent-b);margin-top:2px;">🧩 متوافق مع "${escapeHtml(matchedTerm)}" اللي بحثت عنه</div>` : ''}
         ${inCart > 0 && grp ? `<div class="row-sub" style="color:var(--accent-b);cursor:pointer;margin-top:2px;" onclick="event.stopPropagation();openDisplayNamePicker('${p.id}')">🏷 ${displayName ? 'يُباع باسم: ' + escapeHtml(displayName) : 'بيعه باسم موديل آخر متوافق؟'}</div>` : ''}
@@ -3981,7 +4037,7 @@ function filterInvoiceEditProducts(){
   const matches=products.filter(p=>searchTextMatches(p.name,q)).slice(0,10);
   box.innerHTML=matches.length ? `<div class="ledger" style="margin-top:8px;">${matches.map(p=>`
     <div class="row" style="cursor:pointer;" onclick="addInvoiceEditProduct('${p.id}')">
-      <div class="row-main"><div class="row-name">${escapeHtml(p.name)} ${saleGlassTypeBadge(p)}</div><div class="row-sub">المخزون: ${plainNum(p.qty)} · ${plainNum(p.sellPrice)} ${settings.currency}</div></div>
+      <div class="row-main"><div class="row-name">${escapeHtml(p.name)} ${saleProductKindBadge(p)}</div><div class="row-sub">المخزون: ${plainNum(p.qty)} · ${plainNum(p.sellPrice)} ${settings.currency}</div></div>
       <span class="qty-pill">+ إضافة</span>
     </div>`).join('')}</div>` : `<div class="row-sub" style="margin-top:8px;">لا يوجد صنف مطابق</div>`;
 }
@@ -7009,7 +7065,10 @@ function renderOrdersScreen(){
         <div class="row" ${limited ? '' : `style="cursor:pointer;" onclick="openDraftOrderDetail('${o.id}')"`}>
           <div class="row-main">
             <div class="row-name">${c ? escapeHtml(c.name) : 'عميل محذوف'}${o.status==='ready' ? ' <span class="cat-badge" style="background:var(--profit-bg);color:var(--profit);">✅ جاهزة</span>' : ''}</div>
-            <div class="row-sub">${o.items.map(it=>it.name + ' ×' + it.qty).join('، ')}</div>
+            <div class="row-sub">${o.items.map(it=>{
+              const p = it.productId ? products.find(x=>x.id===it.productId) : products.find(x=>x.name===it.name);
+              return `${escapeHtml(it.name)} ${p ? saleProductKindBadge(p) : ''} ×${it.qty}`;
+            }).join('، ')}</div>
             <div class="row-sub" style="margin-top:2px;">${dateStr}</div>
           </div>
           <div class="row-actions">
@@ -7111,12 +7170,12 @@ function renderDraftOrderItemsList(orderId){
 
   if(!draftOrderDetailEditMode){
     list.innerHTML = order.items.map((it, idx)=>{
-      const realProduct = it.productId ? products.find(x=>x.id===it.productId) : null;
+      const realProduct = it.productId ? products.find(x=>x.id===it.productId) : products.find(x=>x.name===it.name);
       const isOverride = realProduct && realProduct.name !== it.name;
       return `
       <div class="row">
         <div class="row-main">
-          <div class="row-name">${escapeHtml(it.name)}</div>
+          <div class="row-name">${escapeHtml(it.name)} ${realProduct ? saleProductKindBadge(realProduct) : ''}</div>
           <div class="row-sub mono">${it.qty} قطعة × ${plainNum(it.sellPrice)} ${settings.currency} = ${plainNum(it.qty * it.sellPrice)}</div>
           ${isOverride ? `<div class="row-sub" style="color:var(--accent-b);">🧩 الصنف الفعلي: ${escapeHtml(realProduct.name)}</div>` : ''}
         </div>
@@ -7127,12 +7186,12 @@ function renderDraftOrderItemsList(orderId){
   }
 
   list.innerHTML = order.items.map((it, idx)=>{
-    const realProduct = it.productId ? products.find(x=>x.id===it.productId) : null;
+    const realProduct = it.productId ? products.find(x=>x.id===it.productId) : products.find(x=>x.name===it.name);
     const isOverride = realProduct && realProduct.name !== it.name;
     return `
     <div class="row">
       <div class="row-main">
-        <div class="row-name">${escapeHtml(it.name)}</div>
+        <div class="row-name">${escapeHtml(it.name)} ${realProduct ? saleProductKindBadge(realProduct) : ''}</div>
       </div>
       <div style="width:56px;">
         <div class="row-sub" style="text-align:center;">كمية</div>
@@ -7198,7 +7257,7 @@ function renderDraftOrderAddResults(orderId){
   results.innerHTML = `<div class="ledger">${matches.map(p=>`
     <div class="row" style="cursor:pointer;" onclick="addProductToDraftOrder('${orderId}', '${p.id}')">
       <div class="row-main">
-        <div class="row-name">${escapeHtml(p.name)} ${saleGlassTypeBadge(p)}</div>
+        <div class="row-name">${escapeHtml(p.name)} ${saleProductKindBadge(p)}</div>
         <div class="row-sub mono">${plainNum(p.sellPrice)} ${settings.currency} · متوفر ${p.qty}</div>
         ${doSmartMatchInfo[p.id] ? smartDimBadgeHtml(doSmartMatchInfo[p.id]) : ''}
       </div>
