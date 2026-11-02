@@ -2908,6 +2908,15 @@ function setCartDisplayName(productId, name){
 }
 
 
+// تفريغ خانة البحث المشتركة بين البيع وتحضير الطلبية بعد نجاح إضافة الصنف فقط.
+function clearPosSearchAfterAdd(){
+  const searchInput = document.getElementById('posSearch');
+  if(searchInput){
+    searchInput.value = '';
+    searchInput.focus();
+  }
+}
+
 function quickAddToCart(productId){
   const p = products.find(x=>x.id===productId);
   if(!p || p.qty <= 0){ showToast('غير متوفر بالمخزون'); return; }
@@ -2915,6 +2924,7 @@ function quickAddToCart(productId){
   if(cur >= p.qty){ showToast('الكمية غير متوفرة'); return; }
   cart[productId] = Math.min(cur + getSaleStep(p), p.qty);
   renderPos();
+  clearPosSearchAfterAdd();
 }
 
 function quickAddAndClearSearch(productId, matchedTerm){
@@ -2924,10 +2934,8 @@ function quickAddAndClearSearch(productId, matchedTerm){
   if(cur >= p.qty){ showToast('الكمية غير متوفرة'); return; }
   cart[productId] = Math.min(cur + getSaleStep(p), p.qty);
   if(matchedTerm && !cartDisplayName[productId]) cartDisplayName[productId] = matchedTerm;
-  const searchInput = document.getElementById('posSearch');
-  if(searchInput) searchInput.value = '';
   renderPos();
-  if(searchInput) searchInput.focus();
+  clearPosSearchAfterAdd();
 }
 
 
@@ -3046,18 +3054,21 @@ function renderPos(){
 function setCartQty(id, val, matchedTerm){
   const p = products.find(x=>x.id===id);
   if(!p) return;
+  const wasNotSelected = !(cart[id] > 0);
   let qty = parseInt(val);
   if(isNaN(qty) || qty <= 0){ delete cart[id]; renderPos(); return; }
   if(qty > p.qty){ qty = p.qty; showToast('الكمية غير متوفرة، تم الضبط على الحد الأقصى'); }
   if(matchedTerm && !cartDisplayName[id]) cartDisplayName[id] = matchedTerm;
   cart[id] = qty;
   renderPos();
+  if(wasNotSelected) clearPosSearchAfterAdd();
 }
 
 function changeCart(id, delta, matchedTerm){
   const p = products.find(x=>x.id===id);
   if(!p) return;
   const cur = cart[id] || 0;
+  const wasNotSelected = cur <= 0;
   let next = cur + delta;
   if(next <= 0){ delete cart[id]; renderPos(); return; }
   if(next > p.qty){
@@ -3067,6 +3078,7 @@ function changeCart(id, delta, matchedTerm){
   if(matchedTerm && !cartDisplayName[id]) cartDisplayName[id] = matchedTerm;
   cart[id] = next;
   renderPos();
+  if(wasNotSelected) clearPosSearchAfterAdd();
 }
 
 function updateCartBar(){
@@ -3525,8 +3537,8 @@ function showInvoicePreview(inv, autoPrint){
       <div class="sub">${dateStr}</div>
       <hr>
       ${inv.items.map(it=>`
-        <div class="rline">
-          <span class="nm">${escapeHtml(it.name)} <span class="sm">×${it.qty}</span></span>
+        <div class="rline" style="align-items:flex-start;gap:8px;">
+          <span class="nm">${escapeHtml(it.name)} <span class="sm">×${it.qty}</span><span class="sm" style="display:block;">سعر الوحدة: ${plainNum(it.sellPrice)} ${settings.currency}</span></span>
           <span>${plainNum(it.qty*it.sellPrice)}</span>
         </div>
       `).join('')}
@@ -3546,6 +3558,7 @@ function showInvoicePreview(inv, autoPrint){
     <div class="sheet-actions" style="margin-bottom:10px;">
       <button class="btn btn-outline" onclick="closeOverlay()">إغلاق</button>
       <button class="btn btn-brass" onclick='printInvoice(${JSON.stringify(inv).replace(/'/g,"&#39;")})'>🖨 طباعة</button>
+      <button class="btn btn-outline" onclick='printPT210Invoice(${JSON.stringify(inv).replace(/'/g,"&#39;")})'>🖨 PT-210</button>
     </div>
     <div class="sheet-actions" style="margin-bottom:10px;">
       <button class="btn btn-block" style="background:#25D366;color:#fff;" onclick='shareInvoiceAsImage(${JSON.stringify(inv).replace(/'/g,"&#39;")})'>📸 إرسال كصورة (واتساب)</button>
@@ -3834,6 +3847,74 @@ function applyThermalPrintStyle(){
   `;
 }
 
+function invoiceItemGlassType(it){
+  const product = (it && it.productId) ? products.find(p=>p.id===it.productId) : null;
+  return normalizeGlassType((product && product.glassType) || (it && it.glassType) || '');
+}
+
+// طباعة الزجاج مجمّع حسب النوع وسعر الوحدة؛ ESD بسعره المعتاد يُجمع،
+// أما أي موديل ESD بسعر مختلف فيظهر باسمه حتى لا يختلط بالسعر العادي.
+function getInvoicePrintRows(inv){
+  const items = Array.isArray(inv && inv.items) ? inv.items : [];
+  const esdPriceQty = new Map();
+  items.forEach(it=>{
+    if(invoiceItemGlassType(it)==='esd'){
+      const price=Number(it.sellPrice)||0;
+      esdPriceQty.set(price,(esdPriceQty.get(price)||0)+(Number(it.qty)||0));
+    }
+  });
+  // Prefer the most common ESD selling price in the product catalogue. This
+  // still identifies a premium model when it is the only ESD item on a bill.
+  const catalogEsdPrices = new Map();
+  (products||[]).forEach(p=>{
+    if(normalizeGlassType(p && p.glassType)==='esd'){
+      const price=Number(p.sellPrice)||0;
+      catalogEsdPrices.set(price,(catalogEsdPrices.get(price)||0)+1);
+    }
+  });
+  const baselinePrices = catalogEsdPrices.size ? catalogEsdPrices : esdPriceQty;
+  let normalEsdPrice=null;
+  if(baselinePrices.size){
+    normalEsdPrice=[...baselinePrices.entries()].sort((a,b)=>b[1]-a[1] || a[0]-b[0])[0][0];
+  }
+  const grouped=new Map();
+  const rows=[];
+  items.forEach(it=>{
+    const qty=Number(it.qty)||0;
+    const price=Number(it.sellPrice)||0;
+    const type=invoiceItemGlassType(it);
+    if(type==='esd' && price!==normalEsdPrice){
+      rows.push({name:it.name,qty,price,total:qty*price,detail:true});
+      return;
+    }
+    if(type==='esd' || type==='uv' || type==='bordure'){
+      const label=type==='esd'?'ESD':(type==='uv'?'UV':'SANS BORDURE');
+      const key=type+'|'+price;
+      if(!grouped.has(key)) grouped.set(key,{name:label,qty:0,price,total:0,detail:false});
+      const row=grouped.get(key); row.qty+=qty; row.total+=qty*price;
+      return;
+    }
+    rows.push({name:it.name,qty,price,total:qty*price,detail:true});
+  });
+  // Keep grouped glass rows in their first-seen position relative to other rows.
+  // The invoice is compact and all monetary values remain calculated from original items.
+  const result=[]; const emitted=new Set();
+  items.forEach(it=>{
+    const type=invoiceItemGlassType(it), price=Number(it.sellPrice)||0;
+    if(type==='esd' && price!==normalEsdPrice){
+      const row=rows.find(r=>r.detail && r.name===it.name && r.qty===(Number(it.qty)||0) && r.price===price && !r.__used);
+      if(row){ row.__used=true; result.push(row); }
+    }else if(type==='esd' || type==='uv' || type==='bordure'){
+      const key=type+'|'+price;
+      if(!emitted.has(key)){ emitted.add(key); result.push(grouped.get(key)); }
+    }else{
+      const row=rows.find(r=>r.detail && r.name===it.name && r.qty===(Number(it.qty)||0) && r.price===price && !r.__used);
+      if(row){ row.__used=true; result.push(row); }
+    }
+  });
+  return result;
+}
+
 function printInvoice(inv){
   const d = new Date(inv.date);
   const dateStr = d.toLocaleDateString('ar') + ' - ' + d.toLocaleTimeString('ar', {hour:'2-digit', minute:'2-digit'});
@@ -3844,10 +3925,14 @@ function printInvoice(inv){
     ${settings.shopPhone ? `<div class="sub">${escapeHtml(settings.shopPhone)}</div>` : ''}
     <div class="sub">فاتورة #${inv.number} — ${dateStr}</div>
     <hr>
-    ${inv.items.map(it=>`
-      <div class="rline">
-        <span class="nm">${escapeHtml(it.name)} <span class="sm">×${it.qty}</span></span>
-        <span>${plainNum(it.qty*it.sellPrice)}</span>
+    ${getInvoicePrintRows(inv).map(row=>`
+      <div class="invoice-item-detail" style="margin:8px 0 10px;padding-bottom:7px;border-bottom:1px dashed #d8d1c3;page-break-inside:avoid;">
+        <div style="font-size:12px;font-weight:700;color:#1A1A1A;margin-bottom:5px;text-align:right;">${escapeHtml(row.name)}</div>
+        <div style="display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:3px;text-align:center;font-size:9.5px;color:#555;">
+          <div><div style="font-size:9px;color:#8A8676;">الكمية</div><b>${plainNum(row.qty)}</b></div>
+          <div><div style="font-size:9px;color:#8A8676;">سعر الوحدة</div><b>${plainNum(row.price)}</b></div>
+          <div><div style="font-size:9px;color:#8A8676;">السعر الإجمالي</div><b>${plainNum(row.total)}</b></div>
+        </div>
       </div>
     `).join('')}
     <hr>
@@ -6182,6 +6267,352 @@ function selectLabelProduct(productId, labelName){
   `;
 }
 
+/* ================= GOOJPRT PT-210 direct Bluetooth printing ================= */
+// PT-210: 58mm ESC/POS printer. Most firmware revisions expose one of two BLE GATT sets.
+const PT210_SERVICE_UUID = '49535343-fe7d-4ae5-8fa9-9fafd205e455';
+const PT210_WRITE_UUID = '49535343-8841-43f4-a8d4-ecbe34729bb3';
+const PT210_NOTIFY_UUID = '49535343-1e4d-4bd9-ba61-23c647249616';
+const PT210_SERVICE_UUID_ALT = '0000ff00-0000-1000-8000-00805f9b34fb';
+const PT210_WRITE_UUID_ALT = '0000ff02-0000-1000-8000-00805f9b34fb';
+const PT210_NOTIFY_UUID_ALT = '0000ff01-0000-1000-8000-00805f9b34fb';
+const PT210_PAPER_PX = 384; // 48mm printable width at 203dpi
+let pt210Device = null;
+let pt210WriteCharacteristic = null;
+let pt210Connecting = false;
+
+function pt210Supported(){
+  return !!(navigator.bluetooth && window.isSecureContext);
+}
+
+function pt210DisconnectHandler(){
+  pt210WriteCharacteristic = null;
+  showToast('انقطع اتصال PT-210 — اضغط طباعة لإعادة الاتصال');
+}
+
+function isAndroidDevice(){ return /Android/i.test(navigator.userAgent || ''); }
+function bytesToBase64(bytes){
+  let binary='';
+  const chunk=0x8000;
+  for(let i=0;i<bytes.length;i+=chunk){ binary += String.fromCharCode(...bytes.subarray(i,i+chunk)); }
+  return btoa(binary);
+}
+function concatUint8Arrays(parts){
+  const total=parts.reduce((n,a)=>n+a.length,0);
+  const out=new Uint8Array(total); let pos=0;
+  for(const a of parts){ out.set(a,pos); pos+=a.length; }
+  return out;
+}
+async function printPT210ViaRawBT(text, copies=1, opts={}){
+  if(!isAndroidDevice()) return false;
+  const safeCopies=Math.max(1,Math.min(20,Number(copies)||1));
+  const canvas=pt210CanvasForText(text, opts);
+  const {raster,widthBytes,height}=pt210CanvasRaster(canvas);
+  const parts=[pt210EscPosInit()];
+  for(let i=0;i<safeCopies;i++){
+    parts.push(pt210RasterCommand(raster,widthBytes,height));
+    if(opts.label){
+      const gapDots=Math.max(0,Math.min(255,Number.isFinite(Number(opts.labelGapDots))?Number(opts.labelGapDots):16));
+      if(gapDots) parts.push(pt210FeedDots(gapDots));
+    }else{
+      parts.push(pt210Feed(3));
+    }
+  }
+  const raw=bytesToBase64(concatUint8Arrays(parts));
+  const intentUrl='intent:base64,'+raw+'#Intent;scheme=rawbt;package=ru.a402d.rawbtprinter;end;';
+  try{
+    window.location.href=intentUrl;
+    return true;
+  }catch(e){
+    showToast('تعذر فتح RawBT للطباعة');
+    return false;
+  }
+}
+
+async function connectPT210(){
+  if(isAndroidDevice()){
+    showToast('سيتم فتح RawBT لإتمام الربط واختيار طابعة PT-210');
+    return await printPT210ViaRawBT('اختبار Alpha Glass\nGOOJPRT PT-210',1,{fontSize:27});
+  }
+  if(!pt210Supported()){
+    showToast('الطباعة المباشرة تحتاج Chrome عبر HTTPS');
+    return false;
+  }
+  if(pt210WriteCharacteristic && pt210Device?.gatt?.connected) return true;
+  if(pt210Connecting) return false;
+  pt210Connecting = true;
+  try{
+    let device = null;
+    // Reuse a previously authorized PT-210 when Chrome exposes it.
+    if(navigator.bluetooth.getDevices){
+      try{
+        const devices = await navigator.bluetooth.getDevices();
+        device = devices.find(d => {
+          const n = String(d.name || '').toLowerCase();
+          return n.includes('pt-210') || n.includes('pt210') || n.includes('mtp-2') || n.includes('mtp-ii');
+        }) || devices.find(d => d.gatt);
+      }catch(_e){}
+    }
+    if(!device){
+      device = await navigator.bluetooth.requestDevice({
+        acceptAllDevices: true,
+        optionalServices: [PT210_SERVICE_UUID, PT210_SERVICE_UUID_ALT]
+      });
+    }
+    pt210Device = device;
+    if(!pt210Device.__alphaPt210DisconnectBound){
+      pt210Device.addEventListener('gattserverdisconnected', pt210DisconnectHandler);
+      pt210Device.__alphaPt210DisconnectBound = true;
+    }
+    const server = pt210Device.gatt.connected ? pt210Device.gatt : await pt210Device.gatt.connect();
+
+    let service = null;
+    try{ service = await server.getPrimaryService(PT210_SERVICE_UUID); }catch(_e){}
+    if(!service) service = await server.getPrimaryService(PT210_SERVICE_UUID_ALT);
+
+    try{
+      pt210WriteCharacteristic = await service.getCharacteristic(PT210_WRITE_UUID);
+    }catch(_e){
+      pt210WriteCharacteristic = await service.getCharacteristic(PT210_WRITE_UUID_ALT);
+    }
+
+    // Notifications are optional for printing; subscribe when available.
+    try{
+      const notifyChar = await service.getCharacteristic(PT210_NOTIFY_UUID);
+      if(notifyChar.properties.notify) await notifyChar.startNotifications();
+    }catch(_e){
+      try{
+        const notifyChar = await service.getCharacteristic(PT210_NOTIFY_UUID_ALT);
+        if(notifyChar.properties.notify) await notifyChar.startNotifications();
+      }catch(_e2){}
+    }
+
+    showToast(`تم الاتصال بـ ${pt210Device.name || 'PT-210'}`);
+    return true;
+  }catch(err){
+    pt210WriteCharacteristic = null;
+    if(err?.name !== 'NotFoundError') showToast('تعذر الاتصال بطابعة PT-210');
+    return false;
+  }finally{
+    pt210Connecting = false;
+  }
+}
+
+function pt210Delay(ms){ return new Promise(resolve=>setTimeout(resolve, ms)); }
+
+async function pt210Write(bytes){
+  if(!pt210WriteCharacteristic) throw new Error('PT-210 غير متصلة');
+  const data = bytes instanceof Uint8Array ? bytes : new Uint8Array(bytes);
+  // 180 bytes stays safely below the common 182-byte BLE write limit.
+  for(let i=0;i<data.length;i+=180){
+    const chunk = data.slice(i, i+180);
+    if(pt210WriteCharacteristic.writeValueWithoutResponse){
+      await pt210WriteCharacteristic.writeValueWithoutResponse(chunk);
+    }else{
+      await pt210WriteCharacteristic.writeValue(chunk);
+    }
+    await pt210Delay(8);
+  }
+}
+
+function pt210CanvasForText(text, opts={}){
+  // ملصق 40×20 مم على PT-210: 40mm ≈ 320 dots، و20mm ≈ 160 dots عند 203dpi.
+  // نثبت ارتفاع كل ملصق حتى لا تتحول الطباعة إلى ورقة طويلة.
+  const labelMode = opts.label === true;
+  const width = labelMode ? 320 : PT210_PAPER_PX;
+  const padding = labelMode ? 10 : 16;
+  const fontSize = Math.max(20, Number(opts.fontSize || (labelMode ? 30 : 27)));
+  const lineHeight = Math.round(fontSize * 1.25);
+  const rawLines = String(text ?? '').split('\n');
+  const lines = [];
+  const ctxMeasure = document.createElement('canvas').getContext('2d');
+  ctxMeasure.font = `${opts.bold === false ? '' : 'bold '}${fontSize}px Arial, Tahoma, sans-serif`;
+  const maxWidth = width - padding*2;
+  rawLines.forEach(raw=>{
+    const line = String(raw);
+    if(!line){ lines.push(''); return; }
+    // Break long lines while keeping Arabic/Latin readable.
+    let current = '';
+    const parts = line.split(/(\s+)/);
+    for(const part of parts){
+      const test = current + part;
+      if(current && ctxMeasure.measureText(test).width > maxWidth){
+        lines.push(current.trimEnd());
+        current = part.trimStart();
+      }else{
+        current = test;
+      }
+    }
+    if(current || !lines.length) lines.push(current.trimEnd());
+  });
+  const height = labelMode ? 160 : Math.max(lineHeight + 12, lines.length*lineHeight + 18);
+  const canvas = document.createElement('canvas');
+  canvas.width = width;
+  canvas.height = height;
+  const ctx = canvas.getContext('2d', {willReadFrequently:true});
+  ctx.fillStyle = '#fff';
+  ctx.fillRect(0,0,width,height);
+  ctx.fillStyle = '#000';
+  ctx.textBaseline = 'top';
+  ctx.textAlign = opts.align === 'left' ? 'left' : (opts.align === 'right' ? 'right' : 'center');
+  ctx.font = `${opts.bold === false ? '' : 'bold '}${fontSize}px Arial, Tahoma, sans-serif`;
+  const textX = opts.align === 'left' ? padding + Number(opts.offset||0) :
+                opts.align === 'right' ? width - padding + Number(opts.offset||0) :
+                width/2 + Number(opts.offset||0);
+  const textY = labelMode ? Math.max(8, Math.floor((height - lines.length*lineHeight)/2)) : 9;
+  lines.forEach((line,i)=>{
+    ctx.fillText(line, textX, textY + i*lineHeight);
+  });
+  return canvas;
+}
+
+function pt210CanvasRaster(canvas){
+  const ctx=canvas.getContext('2d', {willReadFrequently:true});
+  const img=ctx.getImageData(0,0,canvas.width,canvas.height).data;
+  const widthBytes=Math.ceil(canvas.width/8);
+  const raster=new Uint8Array(widthBytes*canvas.height);
+  for(let y=0;y<canvas.height;y++){
+    for(let x=0;x<canvas.width;x++){
+      const i=(y*canvas.width+x)*4;
+      const luminance=(img[i]*299 + img[i+1]*587 + img[i+2]*114)/1000;
+      if(luminance < 180 && img[i+3] > 20){
+        raster[y*widthBytes+(x>>3)] |= (0x80>>(x&7));
+      }
+    }
+  }
+  return {raster,widthBytes,height:canvas.height};
+}
+
+function pt210RasterCommand(raster,widthBytes,height){
+  return new Uint8Array([
+    0x1d,0x76,0x30,0x00,
+    widthBytes & 0xff,(widthBytes>>8)&0xff,
+    height & 0xff,(height>>8)&0xff,
+    ...raster
+  ]);
+}
+
+function pt210EscPosInit(){ return new Uint8Array([0x1b,0x40]); }
+function pt210Feed(lines=3){ return new Uint8Array([0x1b,0x64,Math.max(0,Math.min(8,lines))]); }
+// ESC/POS: feed paper by an exact number of dots. At 203dpi, 8 dots ≈ 1mm.
+function pt210FeedDots(dots=0){
+  const n=Math.max(0,Math.min(255,Math.round(Number(dots)||0)));
+  return new Uint8Array([0x1b,0x4a,n]);
+}
+
+async function printPT210Text(text, copies=1, opts={}){
+  if(isAndroidDevice()){
+    const ok=await printPT210ViaRawBT(text,copies,opts);
+    if(!ok) showToast('تعذر فتح RawBT؛ تحقق من تثبيته وربط PT-210');
+    return ok;
+  }
+  if(!pt210Supported()){
+    showToast('افتح Alpha Glass من Chrome عبر HTTPS لتفعيل Bluetooth');
+    return false;
+  }
+  if(!pt210WriteCharacteristic || !pt210Device?.gatt?.connected){
+    const ok=await connectPT210();
+    if(!ok) return false;
+  }
+  const safeCopies=Math.max(1, Math.min(50, Number(copies)||1));
+  const canvas=pt210CanvasForText(text, opts);
+  const {raster,widthBytes,height}=pt210CanvasRaster(canvas);
+  try{
+    for(let copy=0;copy<safeCopies;copy++){
+      await pt210Write(pt210EscPosInit());
+      await pt210Delay(30);
+      await pt210Write(pt210RasterCommand(raster,widthBytes,height));
+      await pt210Delay(120);
+      if(opts.label){
+        // الملصق عندنا 20mm ارتفاع ≈ 160 dots. بعد طباعته نضيف فقط
+        // مسافة الفراغ بين الملصقات، بدل تغذية ورقة طويلة.
+        const gapDots=Math.max(0,Math.min(255,Number.isFinite(Number(opts.labelGapDots)) ? Number(opts.labelGapDots) : 16));
+        if(gapDots>0){
+          await pt210Write(pt210FeedDots(gapDots));
+          await pt210Delay(80);
+        }
+      }else{
+        await pt210Write(pt210Feed(3));
+        await pt210Delay(120);
+      }
+    }
+    showToast('تمت الطباعة على PT-210');
+    return true;
+  }catch(err){
+    pt210WriteCharacteristic=null;
+    showToast('تعذر إرسال البيانات إلى PT-210');
+    return false;
+  }
+}
+
+function buildPT210InvoiceText(inv){
+  const d = new Date(inv.date);
+  const dateStr = d.toLocaleDateString('ar') + ' - ' + d.toLocaleTimeString('ar', {hour:'2-digit', minute:'2-digit'});
+  const cust = inv.customerId ? customers.find(c=>c.id===inv.customerId) : null;
+  const lines=[];
+  lines.push(settings.shopName || 'Alpha Glass');
+  if(settings.shopPhone) lines.push(settings.shopPhone);
+  lines.push(`فاتورة #${inv.number}`);
+  lines.push(dateStr);
+  lines.push('--------------------------------');
+  getInvoicePrintRows(inv).forEach(row=>{
+    lines.push(`${row.name}`);
+    lines.push(`  ${row.qty} × ${plainNum(row.price)} = ${plainNum(row.total)} ${settings.currency}`);
+  });
+  lines.push('--------------------------------');
+  if(inv.discountAmount > 0){
+    lines.push(`المجموع: ${plainNum(inv.rawTotal)} ${settings.currency}`);
+    lines.push(`الخصم: -${plainNum(inv.discountAmount)} ${settings.currency}`);
+  }
+  lines.push(`الإجمالي: ${plainNum(inv.total)} ${settings.currency}`);
+  if(cust && inv.remaining > 0){
+    lines.push(`العميل: ${cust.name}`);
+    if(inv.paidNow > 0) lines.push(`المدفوع: ${plainNum(inv.paidNow)} ${settings.currency}`);
+    lines.push(`الدين: ${plainNum(inv.remaining)} ${settings.currency}`);
+  }
+  lines.push('--------------------------------');
+  lines.push('شكراً لتعاملكم معنا');
+  return lines.join('\n');
+}
+
+async function printPT210Invoice(inv){
+  const text=buildPT210InvoiceText(inv);
+  return await printPT210Text(text,1,{fontSize:24});
+}
+
+async function savePT210LabelSettings(){
+  const gapMm=Math.max(0,Math.min(30,Number(document.getElementById('pt210-label-gap')?.value)||0));
+  const font=Math.max(20,Math.min(60,parseInt(document.getElementById('pt210-label-font-size')?.value,10)||30));
+  settings.pt210LabelGapMm=gapMm;
+  settings.pt210LabelGapDots=Math.round(gapMm*8);
+  settings.pt210LabelFontSize=font;
+  settings.pt210LabelAlign=document.getElementById('pt210-label-align')?.value || settings.pt210LabelAlign || 'center';
+  await saveSettings();
+  showToast('تم حفظ إعدادات الملصق');
+}
+
+function openPT210Settings(){
+  const sheet=document.getElementById('sheetContent');
+  sheet.innerHTML=`
+    <div class="sheet-head"><h3>طابعة GOOJPRT PT-210</h3><button class="icon-btn" onclick="closeOverlay()">✕</button></div>
+    <div class="settings-card">
+      <div class="row-name">🖨️ طباعة مباشرة عبر Bluetooth</div>
+      <div class="row-sub" style="margin-top:6px;">PT-210 تعمل بورق 58mm وبأوامر ESC/POS. فعّل Bluetooth ثم اربط الطابعة.</div>
+      <button class="btn btn-brass btn-block" style="margin-top:14px;" onclick="connectPT210()">🔗 ربط PT-210</button>
+      <div class="field" style="margin-top:14px;"><label>ارتفاع الملصق</label><div class="row-sub">40 × 20 مم — ثابت</div></div>
+      <div class="field"><label>الفراغ بين الملصقات <span>• 0 إلى 30 مم</span></label><input type="number" id="pt210-label-gap" min="0" max="30" step="0.5" value="${Number(settings.pt210LabelGapMm ?? 2)}"></div>
+      <div class="field"><label>حجم خط الملصق <span>• 20 إلى 60</span></label><input type="number" id="pt210-label-font-size" min="20" max="60" step="1" value="${Number(settings.pt210LabelFontSize || 30)}"></div>
+      <div class="field"><label>محاذاة الملصق</label><select id="pt210-label-align"><option value="center" ${((settings.pt210LabelAlign||'center')==='center')?'selected':''}>وسط</option><option value="right" ${settings.pt210LabelAlign==='right'?'selected':''}>يمين</option><option value="left" ${settings.pt210LabelAlign==='left'?'selected':''}>يسار</option></select></div>
+      <button class="btn btn-outline btn-block" style="margin-top:8px;" onclick="savePT210LabelSettings()">💾 حفظ إعدادات الملصق</button>
+      <button class="btn btn-outline btn-block" style="margin-top:8px;" onclick="testPT210Print()">🧪 اختبار الطباعة</button>
+    </div>`;
+  openOverlay();
+}
+
+async function testPT210Print(){
+  await printPT210Text('اختبار Alpha Glass\nGOOJPRT PT-210',1,{fontSize:27});
+}
+
+
 function printProductLabels(productId, labelName){
   const p = products.find(x=>x.id===productId);
   if(!p) return;
@@ -6190,6 +6621,15 @@ function printProductLabels(productId, labelName){
   if(isNaN(qty) || qty < 1) qty = 1;
   if(qty > 200) qty = 200;
 
+  const labelOpts={label:true,fontSize:Number(settings.pt210LabelFontSize||30),align:settings.pt210LabelAlign||'center',labelGapDots:Math.round(Number(settings.pt210LabelGapMm??2)*8)};
+  if(isAndroidDevice()){
+    printPT210ViaRawBT(name,qty,labelOpts).then(ok=>{if(ok)showToast('تم إرسال الملصقات إلى RawBT');});
+    return;
+  }
+  if(pt210Supported()){
+    printPT210Text(name,qty,labelOpts);
+    return;
+  }
   const grid = document.getElementById('labelGridContent');
   grid.innerHTML = Array.from({length: qty}).map(()=>`<div class="label-box">${escapeHtml(name)}</div>`).join('');
   window.print();
@@ -6207,6 +6647,15 @@ function printCartLabels(){
     const labelCount = Math.max(1, Math.ceil(qty / LABEL_BATCH_SIZE));
     for(let i=0;i<labelCount;i++) labels.push(name);
   });
+  const labelOpts={label:true,fontSize:Number(settings.pt210LabelFontSize||30),align:settings.pt210LabelAlign||'center',labelGapDots:Math.round(Number(settings.pt210LabelGapMm??2)*8)};
+  if(isAndroidDevice()){
+    (async()=>{for(const n of labels){const ok=await printPT210ViaRawBT(n,1,labelOpts);if(!ok)break;}})();
+    return;
+  }
+  if(pt210Supported()){
+    (async()=>{for(const n of labels){const ok=await printPT210Text(n,1,labelOpts);if(!ok)break;}})();
+    return;
+  }
   const grid = document.getElementById('labelGridContent');
   grid.innerHTML = labels.map(n=>`<div class="label-box">${escapeHtml(n)}</div>`).join('');
   window.print();
@@ -7278,7 +7727,7 @@ async function addProductToDraftOrder(orderId, productId){
   }
   await saveDraftOrders();
   const searchInput = document.getElementById('doAddSearch');
-  if(searchInput) searchInput.value = '';
+  if(searchInput){ searchInput.value = ''; searchInput.focus(); }
   const resultsEl = document.getElementById('doAddResults');
   if(resultsEl) resultsEl.innerHTML = '';
   renderDraftOrderItemsList(orderId);
@@ -7462,6 +7911,9 @@ function openSettings(){
       <div class="field"><label>رمز العملة</label><input type="text" id="s-currency" value="${escapeHtml(settings.currency)}" placeholder="مثال: دج"></div>
       <div class="field" style="margin-bottom:0;"><label>رقم هاتف صديقك <span>• لإرسال الطلبيات مباشرة</span></label><input type="tel" id="s-friendphone" value="${escapeHtml(settings.friendPhone||'')}" placeholder="213xxxxxxxxx (بدون +)"></div>
     </div>
+
+    <div class="settings-group-title"><span class="settings-group-icon">🖨️</span><div><b>طابعة GOOJPRT PT-210</b><small>الربط عبر Bluetooth وإعدادات الملصقات والفواتير</small></div></div>
+    <div class="settings-card"><div class="row" style="cursor:pointer;" onclick="openPT210Settings()"><div class="row-main"><div class="row-name">⚙️ إعدادات طابعة PT-210</div><div class="row-sub">ربط الطابعة، اختبار الطباعة، حجم الخط ومحاذاة الملصق والفراغ</div></div><span class="settings-arrow">‹</span></div></div>
 
     <div class="settings-group-title"><span class="settings-group-icon">🖨️</span><div><b>الطباعة الحرارية</b><small>لطابعة الفواتير والملصقات (نفس الطابعة، غيّر لف الورق)</small></div></div>
     <div class="settings-card">
